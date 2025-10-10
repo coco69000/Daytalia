@@ -1,0 +1,1001 @@
+// souvenir_page.dart
+
+import 'dart:io';
+import 'dart:typed_data'; // Pour les images web
+import 'package:flutter/foundation.dart' show kIsWeb; // Pour les images web
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart' as fbAuth;
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:path/path.dart' as p;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'souvenir_model.dart';
+import 'package:http/http.dart' as http; // AJOUTÉ : Importation nécessaire pour les appels API
+import 'dart:convert'; // AJOUTÉ : Importation nécessaire pour encoder/décoder le JSON
+import 'home_page.dart' show getUserSubscriptionData, showVipPromotionPopup;
+
+// Importez votre HomeBarrePage si vous y naviguez après la sauvegarde
+import 'main.dart'; // Assurez-vous que cette importation est correcte
+
+// THEME: Variable globale pour le mode sombre (vous pouvez la déplacer dans main.dart)
+final ValueNotifier<Brightness> appBrightnessNotifier = ValueNotifier<Brightness>(Brightness.light);
+
+// AJOUTÉ : Clé API nécessaire pour l'analyse des éléments intéressants.
+// (À NE PAS LAISSER EN DUR EN PRODUCTION !)
+const String DEEPSEEK_API_KEY = 'sk-2891f44dd4e344908dda525bf5852649';
+
+
+class SouvenirPage extends StatefulWidget {
+  final SouvenirModel? souvenirToEdit; // Pour l'édition d'un souvenir existant
+  final SouvenirModel? souvenirToRepublish; // NOUVEAU: Pour la republication
+
+  const SouvenirPage({super.key, this.souvenirToEdit, this.souvenirToRepublish});
+
+  @override
+  _SouvenirPageState createState() => _SouvenirPageState(
+    originalSouvenirToRepublish: souvenirToRepublish,
+  );
+}
+
+class _SouvenirPageState extends State<SouvenirPage> {
+  final _formKey = GlobalKey<FormState>();
+  final TextEditingController _souvenirController = TextEditingController();
+  DateTime _selectedDate = DateTime.now();
+  bool _isPublic = false;
+  SouvenirQualite _selectedQualite = SouvenirQualite.nostalgie;
+  double _noteQualite = 50; // Note de 0 à 100, utilisée avec un Slider
+
+  // Pour la sélection d'images
+  final ImagePicker _picker = ImagePicker();
+  List<dynamic> _displayImages = []; // XFile ou String (URLs)
+
+  // Pour l'état de chargement
+  bool _isLoading = false;
+  bool _isVip = false;
+  bool _hasDailyAnalysisChance = true;
+  // NOUVEAU: Pour la republication
+  final bool _isRepublishing;
+  final SouvenirModel? _originalSouvenirToRepublish;
+
+  // NOUVEAU: Pour la mention d'amis
+  List<Map<String, dynamic>> _allFriends = [];
+  List<Map<String, dynamic>> _filteredFriends = [];
+  OverlayEntry? _overlayEntry;
+  String _currentMentionQuery = '';
+
+  _SouvenirPageState({SouvenirModel? originalSouvenirToRepublish})
+      : _isRepublishing = originalSouvenirToRepublish != null,
+        _originalSouvenirToRepublish = originalSouvenirToRepublish;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAppBrightness();
+    _loadFriends();
+    _souvenirController.addListener(_onSouvenirTextChange);
+    _checkVipAndAnalysisStatus(); // NOUVEAU: Vérifier le statut au démarrage
+
+    if (widget.souvenirToEdit != null) {
+      _loadSouvenirForEditing();
+    } else if (_isRepublishing) {
+      _loadSouvenirForRepublishing();
+    }
+  }
+
+  Future<void> _checkVipAndAnalysisStatus() async {
+    final vipData = await getUserSubscriptionData();
+    if (!mounted) return;
+
+    bool hasChance = true;
+    if (!vipData['isVip']) {
+      final prefs = await SharedPreferences.getInstance();
+      final lastAnalysisDateStr = prefs.getString('lastSouvenirAnalysisDate');
+      final todayStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      hasChance = lastAnalysisDateStr != todayStr;
+    }
+
+    setState(() {
+      _isVip = vipData['isVip'];
+      _hasDailyAnalysisChance = hasChance;
+    });
+  }
+
+// NOUVEAU: Widget pour l'alerte VIP
+  Widget _buildVipAlert(bool isDarkMode) {
+    // Ne s'affiche que si l'utilisateur n'est pas VIP et a épuisé sa chance
+    if (_isVip || _hasDailyAnalysisChance) {
+      return const SizedBox.shrink();
+    }
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 20.0),
+      color: isDarkMode ? Colors.yellow.shade900.withOpacity(0.5) : Colors.yellow.shade100,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Colors.amber.shade700, width: 1),
+      ),
+      elevation: 0,
+      child: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.info_outline, color: Colors.amber.shade800),
+                const SizedBox(width: 8),
+                Text(
+                  "Limite quotidienne atteinte",
+                  style: TextStyle(fontWeight: FontWeight.bold, color: Colors.amber.shade900),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              "L'analyse de ce souvenir pour votre autobiographie ne sera pas prise en compte.",
+              style: TextStyle(color: isDarkMode ? Colors.white70 : Colors.black87),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: () => _showAnalysisInfoDialog(isDarkMode),
+                  child: Text("En savoir plus", style: TextStyle(color: Colors.amber.shade900)),
+                ),
+                ElevatedButton(
+                  onPressed: () {
+                    showVipPromotionPopup(context, "Analyse illimitée");
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.amber.shade700,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                  ),
+                  child: const Text("Devenir VIP"),
+                ),
+              ],
+            )
+          ],
+        ),
+      ),
+    );
+  }
+
+// NOUVEAU: Popup d'information
+  void _showAnalysisInfoDialog(bool isDarkMode) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Analyse des souvenirs"),
+        content: const Text(
+            "Chaque jour, votre premier souvenir est analysé par notre IA pour enrichir automatiquement votre autobiographie et affiner votre niveau de vie.\n\n"
+                "Les membres VIP bénéficient de l'analyse de TOUS leurs souvenirs, sans limite quotidienne."
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text("Compris"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _souvenirController.dispose();
+    _removeOverlay(); // Supprime l'overlay si visible
+    super.dispose();
+  }
+
+  // THEME: Nouvelle fonction pour charger la préférence de thème
+  Future<void> _loadAppBrightness() async {
+    try {
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      String? themeMode = prefs.getString('themeMode');
+
+      Brightness loadedBrightness = Brightness.light;
+      if (themeMode == 'dark') {
+        loadedBrightness = Brightness.dark;
+      } else if (themeMode == 'light') {
+        loadedBrightness = Brightness.light;
+      } else {
+        loadedBrightness = WidgetsBinding.instance.platformDispatcher.platformBrightness;
+      }
+
+      if (mounted) {
+        appBrightnessNotifier.value = loadedBrightness;
+      }
+    } catch (e) {
+      print('Erreur de chargement du thème : $e');
+    }
+  }
+
+  void _loadSouvenirForEditing() {
+    final souvenir = widget.souvenirToEdit!;
+    _souvenirController.text = souvenir.texte;
+    setState(() {
+      _selectedDate = souvenir.date;
+      _isPublic = souvenir.estPublic;
+      _selectedQualite = souvenir.qualite;
+      _noteQualite = souvenir.noteQualite.toDouble();
+      _displayImages.addAll(souvenir.photoUrls);
+    });
+  }
+
+  void _loadSouvenirForRepublishing() {
+    final originalSouvenir = _originalSouvenirToRepublish!;
+    _souvenirController.text = 'Republié de ${originalSouvenir.repostedFromUserName ?? 'un ami'} :\n${originalSouvenir.texte}';
+    setState(() {
+      _selectedDate = DateTime.now();
+      _isPublic = originalSouvenir.estPublic;
+      _selectedQualite = originalSouvenir.qualite;
+      _noteQualite = originalSouvenir.noteQualite.toDouble();
+      _displayImages.addAll(originalSouvenir.photoUrls);
+    });
+  }
+
+  Future<void> _loadFriends() async {
+    List<Map<String, dynamic>> friends = await _getFriendsList();
+    if (mounted) {
+      setState(() {
+        _allFriends = friends;
+      });
+    }
+  }
+
+  // Logique de détection des mentions pour TextFormField
+  void _onSouvenirTextChange() {
+    final text = _souvenirController.text;
+    final int cursorPosition = _souvenirController.selection.baseOffset;
+    if (cursorPosition < 0) return; // Sécurité
+
+    final textBeforeCursor = text.substring(0, cursorPosition);
+    final lastAtIndex = textBeforeCursor.lastIndexOf('@');
+
+    if (lastAtIndex != -1) {
+      final query = textBeforeCursor.substring(lastAtIndex + 1);
+      if (!query.contains(' ')) { // Ne montre les suggestions que s'il n'y a pas d'espace
+        _currentMentionQuery = query;
+        setState(() {
+          _filteredFriends = _allFriends
+              .where((friend) =>
+          (friend['username']?.toLowerCase() ?? '')
+              .contains(query.toLowerCase()) ||
+              (friend['name']?.toLowerCase() ?? '')
+                  .contains(query.toLowerCase()))
+              .toList();
+        });
+        _showOverlay();
+      } else {
+        _removeOverlay();
+      }
+    } else {
+      _removeOverlay();
+    }
+  }
+
+  // THEME: L'overlay doit maintenant s'adapter au thème
+  void _showOverlay() {
+    if (_overlayEntry != null) {
+      _removeOverlay();
+    }
+    if (_filteredFriends.isEmpty) return;
+
+
+    OverlayState? overlayState = Overlay.of(context);
+    final RenderBox? renderBox = context.findRenderObject() as RenderBox?;
+    if (renderBox == null) return;
+
+    final Offset offset = renderBox.localToGlobal(Offset.zero);
+    final double fieldWidth = renderBox.size.width;
+    final double fieldHeight = renderBox.size.height;
+
+    _overlayEntry = OverlayEntry(
+      builder: (context) => ValueListenableBuilder<Brightness>(
+        valueListenable: appBrightnessNotifier,
+        builder: (context, brightness, child) {
+          final isDarkMode = brightness == Brightness.dark;
+          return Positioned(
+            top: offset.dy + fieldHeight + 50, // Ajusté pour être sous le champ
+            left: offset.dx,
+            width: fieldWidth,
+            child: Material(
+              elevation: 4.0,
+              color: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+              borderRadius: BorderRadius.circular(8),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 200),
+                child: ListView.builder(
+                  padding: EdgeInsets.zero,
+                  shrinkWrap: true,
+                  itemCount: _filteredFriends.length,
+                  itemBuilder: (context, index) {
+                    final friend = _filteredFriends[index];
+                    return ListTile(
+                      title: Text(
+                        friend['username'] ?? friend['name'] ?? 'Inconnu',
+                        style: TextStyle(color: isDarkMode ? Colors.white : Colors.black),
+                      ),
+                      onTap: () {
+                        _insertMention(friend['username'] ?? friend['name'] ?? 'Inconnu');
+                        _removeOverlay();
+                      },
+                    );
+                  },
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+    overlayState.insert(_overlayEntry!);
+  }
+
+  void _removeOverlay() {
+    _overlayEntry?.remove();
+    _overlayEntry = null;
+  }
+
+  void _insertMention(String friendName) {
+    final text = _souvenirController.text;
+    final int cursorPosition = _souvenirController.selection.baseOffset;
+    if (cursorPosition < 0) return;
+
+    final textBeforeCursor = text.substring(0, cursorPosition);
+    final lastAtIndex = textBeforeCursor.lastIndexOf('@');
+
+    if (lastAtIndex != -1) {
+      final String beforeAt = text.substring(0, lastAtIndex);
+      final String afterMention = text.substring(cursorPosition);
+      final String newText = '$beforeAt@$friendName $afterMention'; // Ajouter un espace après le nom
+
+      _souvenirController.text = newText;
+      _souvenirController.selection = TextSelection.fromPosition(
+        TextPosition(offset: beforeAt.length + friendName.length + 2), // +2 pour '@' et l'espace
+      );
+    }
+  }
+
+  Future<void> _pickImages() async {
+    try {
+      final List<XFile> pickedFiles = await _picker.pickMultiImage(imageQuality: 85);
+      if (pickedFiles.isNotEmpty) {
+        setState(() => _displayImages.addAll(pickedFiles)); // Add XFile objects
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Erreur lors de la sélection d'images: $e")));
+    }
+  }
+
+  void _removeImage(int index) {
+    setState(() => _displayImages.removeAt(index));
+  }
+
+  Future<void> _selectDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(1950),
+      lastDate: DateTime.now(),
+    );
+    if (picked != null && picked != _selectedDate) {
+      setState(() {
+        _selectedDate = picked;
+      });
+    }
+  }
+
+  Future<void> _saveSouvenir() async {
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    fbAuth.User? currentUser = fbAuth.FirebaseAuth.instance.currentUser;
+
+    if (currentUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Vous n'êtes pas connecté.")),
+      );
+      setState(() => _isLoading = false);
+      return;
+    }
+
+    try {
+      List<String> uploadedImageUrls = [];
+      final userId = currentUser.uid;
+
+      for (final item in _displayImages) {
+        if (item is XFile) {
+          final fileExt = p.extension(item.name);
+          final fileName = '$userId/souvenirs/${DateTime.now().millisecondsSinceEpoch}_${p.basename(item.name)}';
+          final fileBytes = await item.readAsBytes();
+          final ref = FirebaseStorage.instance.ref().child('photos').child(fileName);
+          final uploadTask = ref.putData(fileBytes, SettableMetadata(contentType: 'image/${fileExt.substring(1)}'));
+          final snapshot = await uploadTask.whenComplete(() {});
+          final imageUrl = await snapshot.ref.getDownloadURL();
+          uploadedImageUrls.add(imageUrl);
+        } else if (item is String) {
+          uploadedImageUrls.add(item);
+        }
+      }
+
+      DocumentSnapshot userDoc = await FirebaseFirestore.instance.collection('users').doc(currentUser.uid).get();
+      Map<String, dynamic> userData = userDoc.data() as Map<String, dynamic>? ?? {};
+      int qualiteDeVieActuelle = userData['qualiteDeVieActuelle'] ?? 50;
+      int nouvelleQualiteDeVie = ((qualiteDeVieActuelle + _noteQualite.toInt()) / 2).round();
+
+      Map<String, dynamic> souvenirData = {
+        'userId': currentUser.uid,
+        'texte': _souvenirController.text,
+        'date': Timestamp.fromDate(_selectedDate),
+        'estPublic': _isPublic,
+        'qualite': _selectedQualite.name,
+        'noteQualite': _noteQualite.toInt(),
+        'qualiteDeVieActuelle': nouvelleQualiteDeVie,
+        'photoUrls': uploadedImageUrls,
+        'isRepost': _isRepublishing,
+        'repostedFromUserId': _isRepublishing ? _originalSouvenirToRepublish!.userId : null,
+        'repostedFromUserName': _isRepublishing ? await _getUsernameById(_originalSouvenirToRepublish!.userId!) : null,
+      };
+
+      if (widget.souvenirToEdit != null) {
+        await FirebaseFirestore.instance.collection('souvenirs').doc(widget.souvenirToEdit!.id).update(souvenirData);
+      } else {
+        await FirebaseFirestore.instance.collection('souvenirs').add(souvenirData);
+      }
+
+      // --- VIP --- : L'analyse des éléments intéressants est maintenant conditionnelle
+      final vipData = await getUserSubscriptionData();
+      if (vipData['isVip']) {
+        // Les VIP peuvent extraire les éléments sans limite
+        await _enregistrerElementsInteressants(_souvenirController.text);
+      } else {
+        // Pour les non-VIP, on vérifie la date du dernier appel
+        final prefs = await SharedPreferences.getInstance();
+        final lastAnalysisDateStr = prefs.getString('lastSouvenirAnalysisDate');
+        final todayStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
+
+        if (lastAnalysisDateStr != todayStr) {
+          // Si ce n'est pas aujourd'hui, on autorise l'appel et on sauvegarde la date
+          await _enregistrerElementsInteressants(_souvenirController.text);
+          await prefs.setString('lastSouvenirAnalysisDate', todayStr);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Éléments intéressants extraits pour aujourd\'hui !')),
+            );
+          }
+        } else {
+          // Si l'appel a déjà été fait aujourd'hui, on informe l'utilisateur
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text('Limite quotidienne atteinte pour l\'extraction d\'éléments. Devenez VIP pour un accès illimité !'),
+                action: SnackBarAction(
+                  label: 'Devenir VIP',
+                  onPressed: () => showVipPromotionPopup(context, "Extraction d'éléments"),
+                ),
+              ),
+            );
+          }
+        }
+      }
+
+      await FirebaseFirestore.instance.collection('users').doc(currentUser.uid).update({'qualiteDeVieActuelle': nouvelleQualiteDeVie});
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Souvenir sauvegardé !'), backgroundColor: Colors.green));
+        // MODIFIÉ : On renvoie 'true' pour indiquer que la sauvegarde a réussi.
+        // On suppose que la page souvenir a été ouverte avec push(), donc on utilise pop().
+        if (Navigator.canPop(context)) {
+          Navigator.pop(context, true);
+        } else {
+          // Fallback si la page ne peut pas être "popped" (ex: page racine)
+          Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (context) => const HomeBarrePage()), (route) => false);
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erreur lors de la sauvegarde : $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  // AJOUTÉ : Copie de la logique d'extraction des éléments intéressants
+  String normaliserId(String texte) {
+    final Map<String, String> accentsMap = {
+      'à': 'a', 'á': 'a', 'â': 'a', 'ã': 'a', 'ä': 'a',
+      'ç': 'c',
+      'è': 'e', 'é': 'e', 'ê': 'e', 'ë': 'e',
+      'ì': 'i', 'í': 'i', 'î': 'i', 'ï': 'i',
+      'ñ': 'n',
+      'ò': 'o', 'ó': 'o', 'ô': 'o', 'õ': 'o', 'ö': 'o',
+      'ù': 'u', 'ú': 'u', 'û': 'u', 'ü': 'u',
+      'ý': 'y', 'ÿ': 'y',
+      'À': 'a', 'Á': 'a', 'Â': 'a', 'Ã': 'a', 'Ä': 'a',
+      'Ç': 'c',
+      'È': 'e', 'É': 'e', 'Ê': 'e', 'Ë': 'e',
+      'Ì': 'i', 'Í': 'i', 'Î': 'i', 'Ï': 'i',
+      'Ñ': 'n',
+      'Ò': 'o', 'Ó': 'o', 'Ô': 'o', 'Õ': 'o', 'Ö': 'o',
+      'Ù': 'u', 'Ú': 'u', 'Û': 'u', 'Ü': 'u',
+      'Ý': 'y',
+    };
+
+    String result = texte.toLowerCase();
+    accentsMap.forEach((accent, normal) {
+      result = result.replaceAll(accent, normal);
+    });
+    result = result.replaceAll(RegExp(r'[^a-z0-9\s]'), '');
+    result = result.trim().replaceAll(RegExp(r'\s+'), '_');
+
+    if (result.isEmpty) {
+      result = 'categorie_${DateTime.now().millisecondsSinceEpoch}';
+    }
+    return result;
+  }
+
+  // AJOUTÉ : Copie de la logique principale de sauvegarde des éléments
+  Future<void> _enregistrerElementsInteressants(String texte) async {
+    fbAuth.User? currentUser = fbAuth.FirebaseAuth.instance.currentUser;
+    if (currentUser == null) return;
+
+
+    print('Début de l\'analyse du souvenir pour catégorisation...');
+
+    const url = 'https://api.deepseek.com/v1/chat/completions';
+    try {
+      final response = await http.post(
+        Uri.parse(url),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $DEEPSEEK_API_KEY',
+        },
+        body: jsonEncode({
+          'model': 'deepseek-chat',
+          'messages': [
+            {
+              'role': 'user',
+              'content': '''Analyse ce texte et extrais les éléments intéressants qui pourraient être expliqués dans une biographie.
+          Pour chaque élément, détermine une catégorie thématique générale (comme "amis", "travail", "famille", "loisirs", "santé", "voyage", "éducation", "événements").
+          Utilise uniquement des mots simples et des catégories générales.
+          Réponds STRICTEMENT au format JSON suivant, sans aucun texte supplémentaire, ni préambule, ni postface. Assure-toi que la liste 'elements' est toujours présente, même vide:
+          {
+            "elements": [
+              {
+                "texte": "texte intéressant",
+                "explication": "explication de l'élément",
+                "categorie": "catégorie thématique"
+              }
+            ]
+          }
+
+          Texte à analyser : $texte'''
+            }
+          ],
+          'max_tokens': 500,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        String elementsText = data['choices']?[0]['message']['content']?.toString() ?? '';
+        elementsText = elementsText.trim().replaceAll(RegExp(r'^```json\s*|\s*```$'), '');
+
+        Map<String, dynamic>? parsedElements;
+        try {
+          parsedElements = jsonDecode(elementsText);
+        } catch (e) {
+          print("Erreur de parsing JSON pour les éléments intéressants: $e");
+          return;
+        }
+
+        if (parsedElements != null && parsedElements.containsKey('elements')) {
+          List<dynamic> elements = parsedElements['elements'] is List ? parsedElements['elements'] : [];
+          if (elements.isEmpty) {
+            print("Aucun élément intéressant identifié par l'IA dans le souvenir.");
+            return;
+          }
+
+          final categoriesSnapshot = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(currentUser.uid)
+              .collection('categories_elements')
+              .get();
+
+          Map<String, String> categoriesExistantes = {
+            for (var doc in categoriesSnapshot.docs) normaliserId(doc.data()['nom'].toString()): doc.id
+          };
+
+          int elementsTraites = 0;
+          for (var element in elements) {
+            String categorieNom = element['categorie'] ?? '';
+            String texteElement = element['texte'] ?? '';
+            if (categorieNom.isEmpty || texteElement.isEmpty) continue;
+
+            String categorieNormalisee = normaliserId(categorieNom);
+            String categorieId;
+
+            if (categoriesExistantes.containsKey(categorieNormalisee)) {
+              categorieId = categoriesExistantes[categorieNormalisee]!;
+            } else {
+              final newCategorieRef = FirebaseFirestore.instance
+                  .collection('users')
+                  .doc(currentUser.uid)
+                  .collection('categories_elements')
+                  .doc(categorieNormalisee);
+              await newCategorieRef.set({'nom': categorieNom, 'createdAt': Timestamp.now()});
+              categorieId = categorieNormalisee;
+              categoriesExistantes[categorieNormalisee] = categorieId;
+            }
+
+            // Pour un souvenir, la date de l'élément est la date du souvenir lui-même
+            await FirebaseFirestore.instance
+                .collection('users')
+                .doc(currentUser.uid)
+                .collection('categories_elements')
+                .doc(categorieId)
+                .collection('elements')
+                .add({
+              'texte': texteElement,
+              'explication': element['explication'] ?? '',
+              'date': Timestamp.fromDate(_selectedDate), // Date du souvenir
+              'isRepost': _isRepublishing, // Si le souvenir est une republication
+              'repostedFromUserId': _isRepublishing ? _originalSouvenirToRepublish!.userId : null,
+              'repostedFromUserName': _isRepublishing ? await _getUsernameById(_originalSouvenirToRepublish!.userId!) : null,
+            });
+            elementsTraites++;
+          }
+          print('$elementsTraites éléments intéressants du souvenir ont été enregistrés.');
+        }
+      } else {
+        print('Erreur API lors de l\'extraction des éléments : ${response.body}');
+      }
+    } catch (e) {
+      print('Erreur globale lors de l\'enregistrement des éléments intéressants : $e');
+    }
+  }
+
+
+  String _getQualiteLabel(SouvenirQualite qualite) {
+    switch (qualite) {
+      case SouvenirQualite.nostalgie: return "Nostalgie";
+      case SouvenirQualite.jamaisOublie: return "Jamais Oublié";
+      case SouvenirQualite.bonheur: return "Bonheur";
+    }
+  }
+
+  Future<String?> _getUsernameById(String userId) async {
+    try {
+      DocumentSnapshot userDoc = await FirebaseFirestore.instance.collection('users').doc(userId).get();
+      return userDoc['username'];
+    } catch (e) {
+      return null;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _getFriendsList() async {
+    fbAuth.User? currentUser = fbAuth.FirebaseAuth.instance.currentUser;
+    if (currentUser == null) return [];
+
+    try {
+      QuerySnapshot friendsSnapshot = await FirebaseFirestore.instance
+          .collection('friends')
+          .where('users', arrayContains: currentUser.uid)
+          .get();
+
+      List<Future<Map<String, dynamic>>> friendFutures = friendsSnapshot.docs.map((doc) async {
+        List<String> users = List<String>.from(doc['users']);
+        String friendId = users.firstWhere((id) => id != currentUser.uid);
+        DocumentSnapshot userDoc = await FirebaseFirestore.instance.collection('users').doc(friendId).get();
+        return {
+          'id': friendId,
+          'username': userDoc['username'] ?? 'Utilisateur inconnu',
+          'name': userDoc['name'] ?? '',
+        };
+      }).toList();
+      return await Future.wait(friendFutures);
+    } catch (e) {
+      return [];
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<Brightness>(
+      valueListenable: appBrightnessNotifier,
+      builder: (context, brightness, child) {
+        final isDarkMode = brightness == Brightness.dark;
+        final theme = Theme.of(context);
+
+        return Theme(
+          data: isDarkMode ? ThemeData.dark() : ThemeData.light(),
+          child: Scaffold(
+            backgroundColor: isDarkMode ? const Color(0xFF121212) : Colors.grey.shade50,
+            appBar: AppBar(
+              title: Text(
+                _isRepublishing
+                    ? 'Republier un Souvenir'
+                    : (widget.souvenirToEdit == null ? 'Écrire un Souvenir' : 'Modifier le Souvenir'),
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              elevation: 1,
+              backgroundColor: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+              foregroundColor: isDarkMode ? Colors.white : Colors.black,
+            ),
+            body: SingleChildScrollView(
+              padding: const EdgeInsets.all(16.0),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    _buildVipAlert(isDarkMode),
+                    Card(
+                      elevation: 2,
+                      color: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      child: Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: TextFormField(
+                          controller: _souvenirController,
+                          decoration: InputDecoration(
+                            labelText: "Que s'est-il passé ?",
+                            labelStyle: TextStyle(color: isDarkMode ? Colors.white70 : Colors.grey.shade600),
+                            hintText: "Décrivez ce moment précieux (tapez @ pour mentionner)...",
+                            hintStyle: TextStyle(color: isDarkMode ? Colors.white38 : Colors.grey.shade400),
+                            border: InputBorder.none,
+                            icon: Icon(Icons.edit_note, color: isDarkMode ? Colors.white70 : Colors.grey.shade700),
+                          ),
+                          maxLines: 6,
+                          validator: (value) {
+                            if (value == null || value.trim().isEmpty) {
+                              return 'Veuillez décrire votre souvenir.';
+                            }
+                            return null;
+                          },
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 24.0),
+
+                    _buildPhotoSection(isDarkMode),
+                    const SizedBox(height: 24.0),
+
+                    Card(
+                      elevation: 2,
+                      color: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8.0),
+                        child: Column(
+                          children: [
+                            ListTile(
+                              leading: Icon(Icons.calendar_today, color: isDarkMode ? Colors.white70 : Colors.grey.shade700),
+                              title: const Text("Date du souvenir"),
+                              trailing: Text(
+                                DateFormat('dd MMMM yyyy', 'fr_FR').format(_selectedDate),
+                                style: TextStyle(fontWeight: FontWeight.bold, color: theme.colorScheme.primary),
+                              ),
+                              onTap: () => _selectDate(context),
+                            ),
+                            const Divider(indent: 16, endIndent: 16),
+                            ListTile(
+                              leading: Icon(Icons.sentiment_very_satisfied, color: isDarkMode ? Colors.white70 : Colors.grey.shade700),
+                              title: const Text("Qualité du souvenir"),
+                              trailing: DropdownButton<SouvenirQualite>(
+                                value: _selectedQualite,
+                                underline: const SizedBox(),
+                                dropdownColor: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+                                onChanged: (SouvenirQualite? newValue) {
+                                  if (newValue != null) {
+                                    setState(() => _selectedQualite = newValue);
+                                  }
+                                },
+                                items: SouvenirQualite.values.map((qualite) {
+                                  return DropdownMenuItem<SouvenirQualite>(
+                                    value: qualite,
+                                    child: Text(_getQualiteLabel(qualite)),
+                                  );
+                                }).toList(),
+                              ),
+                            ),
+                            const Divider(indent: 16, endIndent: 16),
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text("Intensité du souvenir"),
+                                  Text(
+                                    '${_noteQualite.toInt()}/100',
+                                    style: TextStyle(fontWeight: FontWeight.bold, color: theme.colorScheme.primary),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Slider(
+                              value: _noteQualite,
+                              min: 0,
+                              max: 100,
+                              divisions: 100,
+                              label: _noteQualite.round().toString(),
+                              onChanged: (double value) {
+                                setState(() => _noteQualite = value);
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 24.0),
+
+                    Card(
+                      elevation: 2,
+                      color: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      child: SwitchListTile(
+                        title: const Text("Rendre ce souvenir public"),
+                        secondary: Icon(
+                          _isPublic ? Icons.lock_open : Icons.lock,
+                          color: isDarkMode ? Colors.white70 : Colors.grey.shade700,
+                        ),
+                        value: _isPublic,
+                        onChanged: (bool value) {
+                          setState(() => _isPublic = value);
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 32.0),
+
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: _isLoading ? null : _saveSouvenir,
+                        icon: _isLoading
+                            ? Container(
+                          width: 24,
+                          height: 24,
+                          padding: const EdgeInsets.all(2.0),
+                          child: const CircularProgressIndicator(color: Colors.white, strokeWidth: 3),
+                        )
+                            : const Icon(Icons.save),
+                        label: Text(_isLoading ? 'Sauvegarde...' : 'Sauvegarder le Souvenir'),
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          backgroundColor: Colors.green.shade700,
+                          foregroundColor: Colors.white,
+                          textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildPhotoSection(bool isDarkMode) {
+    return Card(
+      elevation: 2,
+      color: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              "Photos du souvenir",
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            if (_displayImages.isEmpty)
+              Center(
+                child: Text(
+                  "Aucune photo ajoutée.",
+                  style: TextStyle(color: isDarkMode ? Colors.white70 : Colors.grey.shade600),
+                ),
+              )
+            else
+              SizedBox(
+                height: 100,
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _displayImages.length,
+                  itemBuilder: (context, index) {
+                    final item = _displayImages[index];
+                    Widget imageWidget;
+
+                    if (item is XFile) {
+                      if (kIsWeb) {
+                        imageWidget = FutureBuilder<Uint8List>(
+                          future: item.readAsBytes(),
+                          builder: (context, snapshot) {
+                            if (snapshot.connectionState == ConnectionState.done && snapshot.hasData) {
+                              return Image.memory(snapshot.data!, width: 100, height: 100, fit: BoxFit.cover);
+                            }
+                            return const SizedBox(width: 100, height: 100, child: Center(child: CircularProgressIndicator()));
+                          },
+                        );
+                      } else {
+                        imageWidget = Image.file(File(item.path), width: 100, height: 100, fit: BoxFit.cover);
+                      }
+                    } else if (item is String) {
+                      imageWidget = Image.network(
+                        item,
+                        width: 100,
+                        height: 100,
+                        fit: BoxFit.cover,
+                      );
+                    } else {
+                      imageWidget = const SizedBox.shrink();
+                    }
+
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 8.0),
+                      child: Stack(
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(8.0),
+                            child: imageWidget,
+                          ),
+                          Positioned(
+                            top: 4,
+                            right: 4,
+                            child: GestureDetector(
+                              onTap: () => _removeImage(index),
+                              child: Container(
+                                decoration: const BoxDecoration(
+                                  color: Colors.black54,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.close, color: Colors.white, size: 18),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+            const SizedBox(height: 16),
+            Center(
+              child: OutlinedButton.icon(
+                onPressed: _pickImages,
+                icon: const Icon(Icons.add_a_photo),
+                label: const Text("Ajouter des photos"),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: isDarkMode ? Colors.white70 : Colors.black87,
+                  side: BorderSide(color: isDarkMode ? Colors.white54 : Colors.grey.shade400),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

@@ -1,17 +1,15 @@
+﻿// home_page.dart
 
 import 'dart:math' as math;
-import 'dart:math' as Math;
-
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:http/http.dart' as http; // NÉCESSAIRE POUR LES NOTIFICATIONS
-import 'dart:convert'; // NÉCESSAIRE POUR LES NOTIFICATIONS
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import 'journee_page.dart';
 import 'souvenir_page.dart';
 import 'addamis_page.dart';
 import 'dart:ui';
-import 'dart:ui' as ui;
 import 'profil_page.dart';
 import 'dart:math';
 import 'profiluser_page.dart';
@@ -22,15 +20,21 @@ import 'journee_model.dart';
 import 'dart:async';
 import 'souvenir_model.dart';
 import 'souvenir_model.dart' as sm;
-const String DEEPSEEK_API_KEY = 'VOTRE_CLÉ_API_DEEPSEEK';
+import 'package:collection/collection.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'dart:io';
+import 'ai_model_selector.dart';
 
-// --- AMÉLIORATION : CONFIGURATION ONESIGNAL (À METTRE À JOUR) ---
-const String ONE_SIGNAL_APP_ID = "83c44506-2022-4432-a8fe-004e4406416e";
-// ATTENTION : NE JAMAIS LAISSER CETTE CLÉ DANS LE CODE CLIENT EN PRODUCTION !
-const String ONE_SIGNAL_REST_API_KEY = "os_v2_app_qpcekbraejcdfkh6abheibsbny3tigrupigu4vf3vtds3wnadgmdiwe7bi35yw4lcugsvh2shc5tnrnxmoru4aj3w66k6ewldrlguka";
+const String DEEPSEEK_API_KEY = 'HA2RvSG1u7aE7u78yXd1UqnBuMY6VV70';
+const String ONE_SIGNAL_APP_ID = "8046e";
+const String ONE_SIGNAL_REST_API_KEY = "os_v2_app_qpc4aj3w66k6ewldrlguka";
+const String _kApiUrl = 'https://api.deepinfra.com/v1/openai/chat/completions';
+const int _kNonVipAutobiographyCooldownDays = 14;
 
-// --- AMÉLIORATION : Service de notification ---
+// ... Le code de NotificationService, getUserSubscriptionData, showVipPromotionPopup, AutobiographieDialog reste inchangé ...
 class NotificationService {
+  // ... Le code de NotificationService reste inchangé ...
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   static Future<void> sendNotification({
@@ -63,7 +67,9 @@ class NotificationService {
           "contents": {"en": message},
         }),
       );
-      print("--- INFO NOTIFICATION: Notification envoyée à ${validPlayerIds.join(', ')}");
+      print(
+        "--- INFO NOTIFICATION: Notification envoyée à ${validPlayerIds.join(', ')}",
+      );
     } catch (e) {
       print("--- ERREUR NOTIFICATION: Échec de l'envoi de la notification: $e");
     }
@@ -73,8 +79,16 @@ class NotificationService {
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) return;
 
-    final friendsSnapshot = await _firestore.collection('friends').where('users', arrayContains: currentUser.uid).get();
-    final friendIds = friendsSnapshot.docs.expand((doc) => List<String>.from(doc['users'])).toSet()..remove(currentUser.uid);
+    final friendsSnapshot =
+        await _firestore
+            .collection('friends')
+            .where('users', arrayContains: currentUser.uid)
+            .get();
+    final friendIds =
+        friendsSnapshot.docs
+            .expand((doc) => List<String>.from(doc['users']))
+            .toSet()
+          ..remove(currentUser.uid);
 
     if (friendIds.isEmpty) return;
 
@@ -101,7 +115,8 @@ class NotificationService {
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) return;
 
-    final journeeDoc = await _firestore.collection('journees').doc(journeeId).get();
+    final journeeDoc =
+        await _firestore.collection('journees').doc(journeeId).get();
     if (!journeeDoc.exists) return;
 
     final ownerId = journeeDoc['userId'];
@@ -118,658 +133,1974 @@ class NotificationService {
     }
   }
 }
+// ... Le reste du code (getUserSubscriptionData, showVipPromotionPopup, AutobiographieDialog) reste inchangé ...
 
-
-// --- VIP --- : Helper pour récupérer les données utilisateur (VIP, timestamps)
 Future<Map<String, dynamic>> getUserSubscriptionData() async {
   final user = FirebaseAuth.instance.currentUser;
   if (user == null) {
-    return {'isVip': false, 'lastIaUpdate': null, 'lastAutobioUpdate': null, 'autobioPrompt': ''};
+    return {
+      'isVip': false,
+      'lastIaUpdate': null,
+      'lastAutobioUpdate': null,
+      'autobioPrompt': '',
+    };
   }
   try {
-    final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+    final userDoc =
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
     if (userDoc.exists) {
       return {
         'isVip': userDoc.data()?['isVip'] ?? false,
-        'lastIaAnalysisUpdate': userDoc.data()?['lastIaAnalysisUpdate'] as Timestamp?,
-        'lastAutobiographyUpdate': userDoc.data()?['lastAutobiographyUpdate'] as Timestamp?,
-        'autobiographyGeneralPrompt': userDoc.data()?['autobiographyGeneralPrompt'] ?? '',
+        'lastIaAnalysisUpdate':
+            userDoc.data()?['lastIaAnalysisUpdate'] as Timestamp?,
+        'lastAutobiographyUpdate':
+            userDoc.data()?['lastAutobiographyUpdate'] as Timestamp?,
+        'autobiographyGeneralPrompt':
+            userDoc.data()?['autobiographyGeneralPrompt'] ?? '',
       };
     }
   } catch (e) {
     print("Erreur de récupération des données d'abonnement: $e");
   }
-  return {'isVip': false, 'lastIaUpdate': null, 'lastAutobioUpdate': null, 'autobioPrompt': ''};
+  return {
+    'isVip': false,
+    'lastIaUpdate': null,
+    'lastAutobioUpdate': null,
+    'autobioPrompt': '',
+  };
 }
 
-// --- VIP --- : Popup pour encourager l'abonnement
 void showVipPromotionPopup(BuildContext context, String featureName) {
   showDialog(
     context: context,
-    builder: (context) => AlertDialog(
-      title: Row(
-        children: const [
-          Icon(Icons.star, color: Colors.amber),
-          SizedBox(width: 8),
-          Text("Fonctionnalité Premium"),
-        ],
-      ),
-      content: Text("La fonctionnalité '$featureName' est réservée aux membres VIP. Passez à la version premium pour en profiter !"),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text("Plus tard"),
+    builder:
+        (context) => AlertDialog(
+          title: Row(
+            children: const [
+              Icon(Icons.star, color: Colors.amber),
+              SizedBox(width: 8),
+              Text("Fonctionnalité Premium"),
+            ],
+          ),
+          content: Text(
+            "La fonctionnalité '$featureName' est réservée aux membres VIP. Passez à la version premium pour en profiter !",
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text("Plus tard"),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text("Redirection vers la page d'abonnement..."),
+                  ),
+                );
+              },
+              child: const Text("Devenir VIP"),
+            ),
+          ],
         ),
-        ElevatedButton(
-          onPressed: () {
-            Navigator.of(context).pop();
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text("Redirection vers la page d'abonnement...")),
-            );
-          },
-          child: const Text("Devenir VIP"),
-        ),
-      ],
-    ),
   );
 }
+
+enum _ContentMode { allThemes, specificThemes, custom }
+
+class _ChapterDiff {
+  /// Texte original du chapitre avant modification.
+  final String originalContent;
+
+  /// Nouveau texte proposé par l'IA (complet).
+  final String newContent;
+
+  /// Pour "Compléter" : position d'insertion + texte inséré.
+  final int? insertOffset;
+  final String insertedText;
+
+  /// Pour "Mettre à jour" : texte remplacé + nouveau texte.
+  final String replacedText;
+  final String replacementText;
+
+  const _ChapterDiff({
+    required this.originalContent,
+    required this.newContent,
+    this.insertOffset,
+    this.insertedText = '',
+    this.replacedText = '',
+    this.replacementText = '',
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SECTION 3 – DIALOG DE SÉLECTION DE THÈME
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _ThemeSelectionDialog extends StatefulWidget {
+  final int chapterNumber;
+  final bool chapterExists;
+  final bool isDarkMode;
+  final List<Map<String, dynamic>> availableCategories;
+  final Map<String, bool> themeHasUpdates;
+  final Map<String, List<Map<String, dynamic>>> sousThemesParTheme;
+  final Map<String, bool> sousThemeHasUpdates;
+  final String? selectedText;
+  final ScaffoldMessengerState messenger;
+
+  final void Function({
+    required _ContentMode mode,
+    required Set<String> sousThemeKeys,
+    required String customPrompt,
+    required bool isUpdate,
+  })
+  onGenerate;
+
+  final void Function({
+    required _ContentMode mode,
+    required Set<String> sousThemeKeys,
+    required String customPrompt,
+  })
+  onComplete;
+
+  final void Function({
+    required String selectedText,
+    required _ContentMode mode,
+    required Set<String> sousThemeKeys,
+    required String customPrompt,
+  })
+  onRewrite;
+
+  const _ThemeSelectionDialog({
+    required this.chapterNumber,
+    required this.chapterExists,
+    required this.isDarkMode,
+    required this.availableCategories,
+    required this.themeHasUpdates,
+    required this.sousThemesParTheme,
+    required this.sousThemeHasUpdates,
+    required this.selectedText,
+    required this.messenger,
+    required this.onGenerate,
+    required this.onComplete,
+    required this.onRewrite,
+  });
+
+  @override
+  State<_ThemeSelectionDialog> createState() => _ThemeSelectionDialogState();
+}
+
+class _ThemeSelectionDialogState extends State<_ThemeSelectionDialog> {
+  final TextEditingController _promptCtrl = TextEditingController();
+  _ContentMode _mode = _ContentMode.allThemes;
+  final Set<String> _selectedSousThemes = {};
+  final Set<String> _expandedThemes = {};
+
+  @override
+  void dispose() {
+    _promptCtrl.dispose();
+    super.dispose();
+  }
+
+  Color get _accent => widget.isDarkMode ? Colors.blue.shade300 : Colors.blue;
+  Color get _bg => widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white;
+  Color get _surface =>
+      widget.isDarkMode ? const Color(0xFF2C2C2C) : Colors.grey.shade50;
+  Color get _textPrimary => widget.isDarkMode ? Colors.white : Colors.black87;
+  Color get _textSecondary =>
+      widget.isDarkMode ? Colors.white60 : Colors.black54;
+
+  Widget _modeCard({
+    required _ContentMode mode,
+    required IconData icon,
+    required String title,
+    required String subtitle,
+  }) {
+    final selected = _mode == mode;
+    return GestureDetector(
+      onTap:
+          () => setState(() {
+            _mode = mode;
+            if (mode != _ContentMode.specificThemes) {
+              _selectedSousThemes.clear();
+              _expandedThemes.clear();
+            }
+          }),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: selected ? _accent.withOpacity(0.12) : _surface,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: selected ? _accent : Colors.transparent,
+            width: 2,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: selected ? _accent : _textSecondary, size: 22),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: selected ? _accent : _textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: TextStyle(fontSize: 12, color: _textSecondary),
+                  ),
+                ],
+              ),
+            ),
+            if (selected)
+              Icon(Icons.check_circle_rounded, color: _accent, size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: _bg,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+      titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+      contentPadding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+      actionsPadding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
+      title: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      _accent.withOpacity(0.95),
+                      _accent.withOpacity(0.68),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(
+                  Icons.tune_rounded,
+                  color: Colors.white,
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Chapitre ${widget.chapterNumber}',
+                      style: TextStyle(
+                        color: _textPrimary,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 18,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Choisis le mode de génération et les thèmes associés',
+                      style: TextStyle(color: _textSecondary, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+      content: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.68,
+        ),
+        child: Container(
+          decoration: BoxDecoration(
+            color: _surface,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: _accent.withOpacity(0.12)),
+          ),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Source du contenu',
+                  style: TextStyle(
+                    color: _textSecondary,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                _modeCard(
+                  mode: _ContentMode.allThemes,
+                  icon: Icons.all_inclusive,
+                  title: 'Tous les thèmes',
+                  subtitle:
+                      'Utilise tous les éléments biographiques et souvenirs',
+                ),
+                _modeCard(
+                  mode: _ContentMode.specificThemes,
+                  icon: Icons.tune,
+                  title: 'Thèmes spécifiques',
+                  subtitle: 'Choisissez les thèmes à inclure',
+                ),
+                _modeCard(
+                  mode: _ContentMode.custom,
+                  icon: Icons.edit_note,
+                  title: 'Instruction personnalisée',
+                  subtitle:
+                      "L'IA sélectionne les thèmes selon votre description",
+                ),
+                if (_mode == _ContentMode.specificThemes) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    'Sélectionnez les thèmes :',
+                    style: TextStyle(
+                      color: _textSecondary,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  ..._buildThemeCheckboxes(),
+                ],
+                const SizedBox(height: 14),
+                Text(
+                  _mode == _ContentMode.custom
+                      ? 'Décrivez le contenu souhaité *'
+                      : 'Instructions supplémentaires (optionnel)',
+                  style: TextStyle(
+                    color:
+                        _mode == _ContentMode.custom ? _accent : _textSecondary,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: _promptCtrl,
+                  maxLines: _mode == _ContentMode.custom ? 5 : 3,
+                  style: TextStyle(color: _textPrimary),
+                  decoration: InputDecoration(
+                    hintText:
+                        _mode == _ContentMode.custom
+                            ? 'Ex : Parle de mes années lycée…'
+                            : 'Ex : Insiste sur les moments difficiles…',
+                    hintStyle: TextStyle(
+                      color: _textSecondary.withOpacity(0.6),
+                    ),
+                    filled: true,
+                    fillColor:
+                        widget.isDarkMode
+                            ? const Color(0xFF242424)
+                            : Colors.white,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 14,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide(color: _accent.withOpacity(0.4)),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide(
+                        color: _textSecondary.withOpacity(0.2),
+                      ),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide(color: _accent, width: 1.5),
+                    ),
+                  ),
+                ),
+                if (_mode == _ContentMode.specificThemes &&
+                    _selectedSousThemes.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      '⚠ Aucun sous-thème sélectionné → tous utilisés.',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.orange.shade600,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: [_buildActions()],
+    );
+  }
+
+  List<Widget> _buildThemeCheckboxes() {
+    final widgets = <Widget>[];
+    for (final cat in widget.availableCategories) {
+      final themeId = cat['id'] as String;
+      final themeNom = cat['nom'] as String;
+      final sousThemes = widget.sousThemesParTheme[themeId] ?? [];
+      final isExpanded = _expandedThemes.contains(themeId);
+      final hasUpdates = widget.themeHasUpdates[themeId] ?? false;
+      final allStKeys = sousThemes.map((st) => '$themeId||${st['id']}').toSet();
+      final selectedCount = allStKeys.intersection(_selectedSousThemes).length;
+      final isThemeChecked =
+          selectedCount == allStKeys.length && allStKeys.isNotEmpty;
+      final isThemeIndeterminate = selectedCount > 0 && !isThemeChecked;
+
+      widgets.add(
+        Container(
+          margin: const EdgeInsets.only(bottom: 4),
+          decoration: BoxDecoration(
+            color: _surface,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Column(
+            children: [
+              CheckboxListTile(
+                dense: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+                title: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        themeNom,
+                        style: TextStyle(
+                          color: _textPrimary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    if (hasUpdates) _badgeNew(Colors.green),
+                    if (sousThemes.isNotEmpty)
+                      IconButton(
+                        icon: Icon(
+                          isExpanded ? Icons.expand_less : Icons.expand_more,
+                          size: 18,
+                          color: _textSecondary,
+                        ),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        onPressed:
+                            () => setState(
+                              () =>
+                                  isExpanded
+                                      ? _expandedThemes.remove(themeId)
+                                      : _expandedThemes.add(themeId),
+                            ),
+                      ),
+                  ],
+                ),
+                value: isThemeIndeterminate ? null : isThemeChecked,
+                tristate: true,
+                onChanged:
+                    (v) => setState(() {
+                      if (v == true || v == null) {
+                        _selectedSousThemes.addAll(allStKeys);
+                        _expandedThemes.add(themeId);
+                      } else {
+                        _selectedSousThemes.removeAll(allStKeys);
+                        _expandedThemes.remove(themeId);
+                      }
+                    }),
+                activeColor: _accent,
+                checkColor: Colors.white,
+              ),
+              if (isExpanded)
+                ...sousThemes.map((st) {
+                  final stKey = '$themeId||${st['id']}';
+                  return Padding(
+                    padding: const EdgeInsets.only(left: 24),
+                    child: CheckboxListTile(
+                      dense: true,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+                      secondary: Icon(
+                        Icons.subdirectory_arrow_right,
+                        size: 14,
+                        color: _textSecondary,
+                      ),
+                      title: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              st['nom'] as String,
+                              style: TextStyle(
+                                color: _textPrimary,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                          if (widget.sousThemeHasUpdates[stKey] ?? false)
+                            _badgeNew(Colors.green.shade400),
+                        ],
+                      ),
+                      value: _selectedSousThemes.contains(stKey),
+                      onChanged:
+                          (v) => setState(
+                            () =>
+                                v == true
+                                    ? _selectedSousThemes.add(stKey)
+                                    : _selectedSousThemes.remove(stKey),
+                          ),
+                      activeColor: _accent.withOpacity(0.8),
+                    ),
+                  );
+                }),
+            ],
+          ),
+        ),
+      );
+    }
+    return widgets;
+  }
+
+  Widget _badgeNew(Color c) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+    decoration: BoxDecoration(color: c, borderRadius: BorderRadius.circular(6)),
+    child: const Text(
+      'Nouveau',
+      style: TextStyle(
+        color: Colors.white,
+        fontSize: 9,
+        fontWeight: FontWeight.bold,
+      ),
+    ),
+  );
+
+  Widget _buildActions() {
+    bool canProceed() {
+      if (_mode == _ContentMode.custom && _promptCtrl.text.trim().isEmpty) {
+        widget.messenger.showSnackBar(
+          const SnackBar(
+            content: Text('Veuillez écrire une instruction personnalisée.'),
+          ),
+        );
+        return false;
+      }
+      return true;
+    }
+
+    Set<String> keys() =>
+        _mode == _ContentMode.specificThemes
+            ? Set<String>.from(_selectedSousThemes)
+            : <String>{};
+
+    return Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      alignment: WrapAlignment.end,
+      children: [
+        SizedBox(
+          height: 44,
+          child: TextButton.icon(
+            onPressed: () => Navigator.of(context).pop(),
+            icon: const Icon(Icons.close_rounded, size: 18),
+            label: const Text('Annuler'),
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.redAccent,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+            ),
+          ),
+        ),
+        if (widget.chapterExists)
+          SizedBox(
+            height: 44,
+            child: OutlinedButton.icon(
+              icon: const Icon(Icons.expand_more, size: 18),
+              label: const Text('Compléter'),
+              onPressed: () {
+                if (!canProceed()) return;
+                Navigator.of(context).pop();
+                widget.onComplete(
+                  mode: _mode,
+                  sousThemeKeys: keys(),
+                  customPrompt: _promptCtrl.text.trim(),
+                );
+              },
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.purple,
+                side: BorderSide(color: Colors.purple.withOpacity(0.5)),
+                backgroundColor: Colors.purple.withOpacity(0.05),
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+            ),
+          ),
+        if (widget.chapterExists)
+          SizedBox(
+            height: 44,
+            child: Tooltip(
+              message:
+                  widget.selectedText == null
+                      ? 'Sélectionnez du texte dans le chapitre pour activer'
+                      : 'Réécrire le passage sélectionné',
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.auto_fix_high, size: 18),
+                label: const Text('Mettre à jour'),
+                onPressed:
+                    widget.selectedText == null
+                        ? null
+                        : () {
+                          if (!canProceed()) return;
+                          Navigator.of(context).pop();
+                          widget.onRewrite(
+                            selectedText: widget.selectedText!,
+                            mode: _mode,
+                            sousThemeKeys: keys(),
+                            customPrompt: _promptCtrl.text.trim(),
+                          );
+                        },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.amber.shade700,
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: Colors.grey.shade300,
+                  disabledForegroundColor: Colors.grey.shade500,
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        SizedBox(
+          height: 44,
+          child: ElevatedButton.icon(
+            icon: Icon(
+              widget.chapterExists ? Icons.update_rounded : Icons.auto_fix_high,
+              size: 18,
+            ),
+            label: Text(widget.chapterExists ? 'Régénérer' : 'Générer'),
+            onPressed: () {
+              if (!canProceed()) return;
+              Navigator.of(context).pop();
+              widget.onGenerate(
+                mode: _mode,
+                sousThemeKeys: keys(),
+                customPrompt: _promptCtrl.text.trim(),
+                isUpdate: widget.chapterExists,
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _accent,
+              foregroundColor: Colors.white,
+              elevation: 3,
+              padding: const EdgeInsets.symmetric(horizontal: 18),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SECTION 4 – AUTOBIOGRAPHIE DIALOG (refonte complète)
+// ═══════════════════════════════════════════════════════════════════════════
+
 class AutobiographieDialog extends StatefulWidget {
   const AutobiographieDialog({Key? key}) : super(key: key);
-
   @override
   State<AutobiographieDialog> createState() => _AutobiographieDialogState();
 }
 
 class _AutobiographieDialogState extends State<AutobiographieDialog> {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final User? _currentUser = FirebaseAuth.instance.currentUser;
+  // ── Firebase ─────────────────────────────────────────────────────────────
+  final _db = FirebaseFirestore.instance;
+  final User? _user = FirebaseAuth.instance.currentUser;
 
+  // ── État général ──────────────────────────────────────────────────────────
+  bool _isFullScreen = false;
+  bool _isLoadingChapters = true;
+  bool _isLoadingCategories = true;
+  bool _isLoadingUpdates = true;
+  bool _isLoadingVisibility = true;
+  bool _isAutobiographiePublic = true;
+  bool _showThemesView = false;
+
+  // ── Chapitres ─────────────────────────────────────────────────────────────
   Map<int, Map<String, dynamic>> _chaptersData = {};
+  int? _generatingChapter;
+  int? _completingChapter;
+  int? _rewritingChapter;
+
+  // ── Diff en attente (Accepter / Refuser) ──────────────────────────────────
+  // clé = numéro de chapitre
+  Map<int, _ChapterDiff> _pendingDiffs = {};
+
+  // ── Edition manuelle ──────────────────────────────────────────────────────
+  Map<int, bool> _editModes = {};
+  Map<int, TextEditingController> _editControllers = {};
+  // Images insérées en édition manuelle : liste d'URLs (Firebase Storage ou réseau)
+  Map<int, List<String>> _editImages = {};
+
+  // ── Sélection de texte ────────────────────────────────────────────────────
+  Map<int, String> _selectedTextByChapter = {};
+
+  // ── Thèmes biographiques ──────────────────────────────────────────────────
   List<Map<String, dynamic>> _availableCategories = [];
   Map<String, String> _categoryNames = {};
   Map<String, bool> _themeHasUpdates = {};
-  bool _isLoadingUpdates = true;
+  Map<String, bool> _sousThemeHasUpdates = {};
+  Map<String, List<Map<String, dynamic>>> _sousThemesParTheme = {};
 
-  bool _isLoadingChapters = true;
-  bool _isLoadingCategories = true;
-  int? _generatingChapterNumber;
-  bool _isAutobiographiePublic = true;
-  bool _isLoadingVisibility = true;
-
+  // ── VIP ───────────────────────────────────────────────────────────────────
   bool _isVip = false;
+  bool _canUpdate = false;
   DateTime? _lastAutobioUpdate;
-  bool _canUpdateAutobio = false;
-  final TextEditingController _promptController = TextEditingController();
 
+  // ═════════════════════════════════════════════════════════════════════════
+  // LIFECYCLE
+  // ═════════════════════════════════════════════════════════════════════════
 
   @override
   void initState() {
     super.initState();
-    if (_currentUser != null) {
-      _loadInitialData();
-      _loadVisibility();
-      _loadVipData();
-    } else {
+    if (_user != null)
+      _init();
+    else
       setState(() {
         _isLoadingChapters = false;
         _isLoadingCategories = false;
         _isLoadingUpdates = false;
         _isLoadingVisibility = false;
       });
-    }
   }
+
+  @override
+  void dispose() {
+    for (final c in _editControllers.values) c.dispose();
+    super.dispose();
+  }
+
+  Future<void> _init() async {
+    await Future.wait([_loadVipData(), _loadVisibility()]);
+    await _loadCategories();
+    await Future.wait([_loadChapters(), _checkThemesForUpdates()]);
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // CHARGEMENT
+  // ═════════════════════════════════════════════════════════════════════════
 
   Future<void> _loadVipData() async {
-    final data = await getUserSubscriptionData();
-    if (mounted) {
-      setState(() {
-        _isVip = data['isVip'];
-        final lastUpdateTimestamp = data['lastAutobioUpdate'] as Timestamp?;
-        _lastAutobioUpdate = lastUpdateTimestamp?.toDate();
-        _promptController.text = data['autobioPrompt'] ?? '';
-        _checkIfCanUpdate();
-      });
-    }
-  }
-
-  void _checkIfCanUpdate() {
-    if (_isVip) {
-      _canUpdateAutobio = true;
-      return;
-    }
-    if (_lastAutobioUpdate == null) {
-      _canUpdateAutobio = true;
-    } else {
-      _canUpdateAutobio = DateTime.now().difference(_lastAutobioUpdate!).inDays >= 7;
-    }
-  }
-
-  Future<void> _saveGeneralPrompt() async {
-    if (_currentUser == null) return;
+    if (_user == null) return;
     try {
-      await _firestore
-          .collection('users')
-          .doc(_currentUser!.uid)
-          .set({'autobiographyGeneralPrompt': _promptController.text}, SetOptions(merge: true));
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Prompt général sauvegardé !'), backgroundColor: Colors.green),
-      );
+      final doc = await _db.collection('users').doc(_user!.uid).get();
+      final data = doc.data() ?? {};
+      if (!mounted) return;
+      setState(() {
+        _isVip = data['isVip'] ?? false;
+        final ts = data['lastAutobiographyUpdate'] as Timestamp?;
+        _lastAutobioUpdate = ts?.toDate();
+        _canUpdate =
+            _isVip ||
+            _lastAutobioUpdate == null ||
+            DateTime.now().difference(_lastAutobioUpdate!).inDays >=
+                _kNonVipAutobiographyCooldownDays;
+      });
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erreur: $e'), backgroundColor: Colors.red),
-      );
+      debugPrint('[AUTOBIO] _loadVipData erreur: $e');
     }
   }
 
   Future<void> _loadVisibility() async {
-    if (_currentUser == null) return;
+    if (_user == null) return;
     try {
-      final userDoc = await _firestore.collection('users').doc(_currentUser!.uid).get();
-      if (userDoc.exists && userDoc.data()!.containsKey('isAutobiographiePublic')) {
-        if (mounted) {
-          setState(() {
-            _isAutobiographiePublic = userDoc.data()!['isAutobiographiePublic'];
-          });
-        }
-      }
+      final doc = await _db.collection('users').doc(_user!.uid).get();
+      if (!mounted) return;
+      setState(() {
+        _isAutobiographiePublic = doc.data()?['isAutobiographiePublic'] ?? true;
+        _isLoadingVisibility = false;
+      });
     } catch (e) {
-      print("Erreur lors du chargement de la visibilité: $e");
-    } finally {
-      if (mounted) {
-        setState(() => _isLoadingVisibility = false);
-      }
+      if (mounted) setState(() => _isLoadingVisibility = false);
     }
   }
 
-  Future<void> _toggleVisibility(bool isPublic) async {
-    if (_currentUser == null) return;
-    setState(() {
-      _isAutobiographiePublic = isPublic;
-    });
+  Future<void> _toggleVisibility(bool v) async {
+    if (_user == null) return;
+    setState(() => _isAutobiographiePublic = v);
     try {
-      await _firestore
-          .collection('users')
-          .doc(_currentUser!.uid)
-          .set({'isAutobiographiePublic': isPublic}, SetOptions(merge: true));
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Visibilité de l\'autobiographie mise à jour.'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      await _db.collection('users').doc(_user!.uid).set({
+        'isAutobiographiePublic': v,
+      }, SetOptions(merge: true));
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Visibilité mise à jour.'),
+            backgroundColor: Colors.green,
+          ),
+        );
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Erreur lors de la mise à jour: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erreur: $e'), backgroundColor: Colors.red),
+        );
     }
-  }
-
-  Future<void> _loadInitialData() async {
-    await _loadCategories();
-    await Future.wait([
-      _loadChapters(),
-      _checkThemesForUpdates(),
-    ]);
   }
 
   Future<void> _loadCategories() async {
-    if (_currentUser == null) return;
+    if (_user == null) return;
     try {
-      final snapshot = await _firestore
-          .collection('users')
-          .doc(_currentUser!.uid)
-          .collection('categories_elements')
-          .get();
-
-      final loadedCategories = snapshot.docs.map((doc) {
+      final snap =
+          await _db
+              .collection('users')
+              .doc(_user!.uid)
+              .collection('themes_biographiques')
+              .get();
+      final cats = <Map<String, dynamic>>[];
+      final stMap = <String, List<Map<String, dynamic>>>{};
+      for (final doc in snap.docs) {
         final data = doc.data();
-        _categoryNames[doc.id] = data['nom'] as String;
-        return {'id': doc.id, 'nom': data['nom']};
-      }).toList();
-
-      if (mounted) {
+        final nom = data['nom'] as String? ?? doc.id;
+        _categoryNames[doc.id] = nom;
+        cats.add({'id': doc.id, 'nom': nom});
+        try {
+          final stSnap = await doc.reference.collection('sous_themes').get();
+          stMap[doc.id] =
+              stSnap.docs
+                  .map(
+                    (st) => {
+                      'id': st.id,
+                      'nom': st.data()['nom'] as String? ?? st.id,
+                    },
+                  )
+                  .toList();
+        } catch (_) {
+          stMap[doc.id] = [];
+        }
+      }
+      if (mounted)
         setState(() {
-          _availableCategories = loadedCategories;
+          _availableCategories = cats;
+          _sousThemesParTheme = stMap;
           _isLoadingCategories = false;
         });
-      }
-    } catch (e, stackTrace) {
-      print('Erreur lors du chargement des catégories: $e\n$stackTrace');
+    } catch (e) {
+      debugPrint('[AUTOBIO] _loadCategories erreur: $e');
       if (mounted) setState(() => _isLoadingCategories = false);
     }
   }
+
   Future<void> _checkThemesForUpdates() async {
-    if (_currentUser == null || _availableCategories.isEmpty) {
+    if (_user == null || _availableCategories.isEmpty) {
       if (mounted) setState(() => _isLoadingUpdates = false);
       return;
     }
-
-    final updates = <String, bool>{};
-    for (var category in _availableCategories) {
-      final categoryId = category['id'] as String;
+    final themeUpd = <String, bool>{};
+    final stUpd = <String, bool>{};
+    for (final cat in _availableCategories) {
+      final themeId = cat['id'] as String;
+      bool hasNew = false;
       try {
-        final snapshot = await _firestore
-            .collection('users')
-            .doc(_currentUser!.uid)
-            .collection('categories_elements')
-            .doc(categoryId)
-            .collection('elements')
-            .where('lastAnalyzedAutobiographie', isEqualTo: null)
-            .limit(1)
-            .get();
-        updates[categoryId] = snapshot.docs.isNotEmpty;
-      } catch (e) {
-        print("Erreur de vérification des MaJ pour le thème $categoryId: $e");
-        updates[categoryId] = false;
-      }
+        final stSnap =
+            await _db
+                .collection('users')
+                .doc(_user!.uid)
+                .collection('themes_biographiques')
+                .doc(themeId)
+                .collection('sous_themes')
+                .get();
+        for (final st in stSnap.docs) {
+          final extraits =
+              await st.reference
+                  .collection('extraits')
+                  .where('lastAnalyzedAutobiographie', isEqualTo: null)
+                  .limit(1)
+                  .get();
+          final has = extraits.docs.isNotEmpty;
+          stUpd['$themeId||${st.id}'] = has;
+          if (has) hasNew = true;
+        }
+      } catch (_) {}
+      themeUpd[themeId] = hasNew;
     }
-
-    if (mounted) {
+    if (mounted)
       setState(() {
-        _themeHasUpdates = updates;
+        _themeHasUpdates = themeUpd;
+        _sousThemeHasUpdates = stUpd;
         _isLoadingUpdates = false;
       });
-    }
   }
 
   Future<void> _loadChapters() async {
-    if (_currentUser == null) return;
+    if (_user == null) return;
     try {
-      final snapshot = await _firestore
-          .collection('users')
-          .doc(_currentUser!.uid)
-          .collection('chapters')
-          .get();
-
-      final loadedChapters = <int, Map<String, dynamic>>{};
-      for (var doc in snapshot.docs) {
+      final snap =
+          await _db
+              .collection('users')
+              .doc(_user!.uid)
+              .collection('chapters')
+              .get();
+      final loaded = <int, Map<String, dynamic>>{};
+      for (final doc in snap.docs) {
         final data = doc.data();
-        if (data.containsKey('number')) {
-          loadedChapters[data['number']] = data;
-        }
+        if (data.containsKey('number')) loaded[data['number'] as int] = data;
       }
-
-      if (mounted) {
+      if (mounted)
         setState(() {
-          _chaptersData = loadedChapters;
+          _chaptersData = loaded;
           _isLoadingChapters = false;
         });
-      }
-    } catch (e, stackTrace) {
-      print('Erreur lors du chargement des chapitres: $e\n$stackTrace');
+    } catch (e) {
+      debugPrint('[AUTOBIO] _loadChapters erreur: $e');
       if (mounted) setState(() => _isLoadingChapters = false);
     }
   }
 
-  void _promptForThemeSelection(int chapterNumber) {
-    final messenger = ScaffoldMessenger.of(context);
+  // ═════════════════════════════════════════════════════════════════════════
+  // SÉLECTION IA DES SOUS-THÈMES
+  // ═════════════════════════════════════════════════════════════════════════
 
-    List<Map<String, dynamic>> dialogCategories =
-    _availableCategories.map((c) => Map<String, dynamic>.from(c)).toList();
-    for (var cat in dialogCategories) {
-      cat['selected'] = false;
-    }
-
-    showDialog(
-      context: context,
-      builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              title: Text('Thèmes du Chapitre $chapterNumber', style: const TextStyle(color: Colors.blue)),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Choisissez les thèmes à inclure.'),
-                    const SizedBox(height: 16),
-                    ListTile(
-                      title: const Text('Tous les thèmes (recréer)'),
-                      leading: const Icon(Icons.all_inclusive, color: Colors.blue),
-                      onTap: () {
-                        Navigator.of(dialogContext).pop();
-                        _generateAndSaveChapter(chapterNumber, selectedThemeIds: null, isUpdate: false);
-                      },
-                    ),
-                    const Divider(),
-                    ...dialogCategories.map((category) {
-                      final bool hasUpdates = _themeHasUpdates[category['id']] ?? false;
-                      return CheckboxListTile(
-                        title: Row(
-                          children: [
-                            Expanded(child: Text(category['nom'])),
-                            if (hasUpdates)
-                              Chip(
-                                label: const Text('Nouveau', style: TextStyle(fontSize: 10)),
-                                backgroundColor: Colors.green.shade100,
-                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                              ),
-                          ],
-                        ),
-                        value: category['selected'],
-                        onChanged: (bool? value) {
-                          setDialogState(() {
-                            category['selected'] = value ?? false;
-                          });
-                        },
-                        activeColor: Colors.blue,
-                      );
-                    }).toList(),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(dialogContext).pop(),
-                  child: const Text('Annuler', style: TextStyle(color: Colors.red)),
-                ),
-                ElevatedButton(
-                  onPressed: () {
-                    final selectedIds = dialogCategories
-                        .where((cat) => cat['selected'] == true)
-                        .map((cat) => cat['id'] as String)
-                        .toList();
-                    if (selectedIds.isEmpty) {
-                      messenger.showSnackBar(const SnackBar(content: Text('Veuillez sélectionner au moins un thème.')));
-                      return;
-                    }
-                    Navigator.of(dialogContext).pop();
-                    _generateAndSaveChapter(chapterNumber, selectedThemeIds: selectedIds, isUpdate: true);
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
-                    foregroundColor: Colors.white,
-                  ),
-                  child: const Text('Mettre à jour'),
-                ),
-                ElevatedButton(
-                  onPressed: () {
-                    final selectedIds = dialogCategories
-                        .where((cat) => cat['selected'] == true)
-                        .map((cat) => cat['id'] as String)
-                        .toList();
-                    if (selectedIds.isEmpty) {
-                      messenger.showSnackBar(const SnackBar(content: Text('Veuillez sélectionner au moins un thème.')));
-                      return;
-                    }
-                    Navigator.of(dialogContext).pop();
-                    _generateAndSaveChapter(chapterNumber, selectedThemeIds: selectedIds, isUpdate: false);
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue,
-                    foregroundColor: Colors.white,
-                  ),
-                  child: const Text('Recréer'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-  Future<void> _generateAndSaveChapter(
-      int chapterNumber, {
-        required List<String>? selectedThemeIds,
-        required bool isUpdate,
-      }) async {
-    if (_currentUser == null || !mounted) return;
-    final messenger = ScaffoldMessenger.of(context);
-    setState(() => _generatingChapterNumber = chapterNumber);
-
+  Future<Set<String>?> _smartSelectSousThemes(String instruction) async {
+    if (_sousThemesParTheme.isEmpty) return null;
+    final lines = <String>[];
+    _sousThemesParTheme.forEach((themeId, sousThemes) {
+      final themeName = _categoryNames[themeId] ?? themeId;
+      for (final st in sousThemes)
+        lines.add('"$themeId||${st['id']}": "$themeName > ${st['nom']}"');
+    });
+    if (lines.isEmpty) return null;
     try {
-      final fetchResult = await _fetchChapterElements(selectedThemeIds, isUpdate: isUpdate);
-      final List<Map<String, dynamic>> elementsWithImages = fetchResult['data'];
-      final List<DocumentReference> elementRefs = fetchResult['refs'];
-
-      if (!mounted) return;
-
-      if (elementsWithImages.isEmpty) {
-        messenger.showSnackBar(SnackBar(
-            content: Text(isUpdate ? 'Aucun nouvel élément à ajouter.' : 'Aucun élément trouvé pour les thèmes sélectionnés.')));
-        setState(() => _generatingChapterNumber = null);
-        return;
-      }
-
-      final previousChapterContent = _chaptersData[chapterNumber - 1]?['content'] ?? '';
-      final existingContent = _chaptersData[chapterNumber]?['content'];
-
-      final newContent = await _generateChapterContent(
-        chapterNumber: chapterNumber,
-        elements: elementsWithImages,
-        previousChapterContent: previousChapterContent,
-        existingContent: isUpdate ? existingContent : null,
-        generalPrompt: _isVip ? _promptController.text : null,
+      final resp = await http.post(
+        Uri.parse(_kApiUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $DEEPSEEK_API_KEY',
+        },
+        body: jsonEncode({
+          'model': await resolveAiModel(isVip: _isVip),
+          'max_tokens': 400,
+          'messages': [
+            {
+              'role': 'system',
+              'content':
+                  'Réponds UNIQUEMENT avec du JSON valide. Format: {"ids": ["themeId1||sousThemeId1", ...]}',
+            },
+            {
+              'role': 'user',
+              'content':
+                  'Instruction: "$instruction"\n\nThèmes:\n${lines.join('\n')}\n\nSélectionne les plus pertinents. Réponds: {"ids": [...]}',
+            },
+          ],
+        }),
       );
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(resp.bodyBytes));
+        final raw = (data['choices'][0]['message']['content'] as String).trim();
+        Map<String, dynamic>? parsed;
+        try {
+          parsed = jsonDecode(raw) as Map<String, dynamic>;
+        } catch (_) {
+          final m = RegExp(r'\{[\s\S]*\}', dotAll: true).firstMatch(raw);
+          if (m != null)
+            try {
+              parsed = jsonDecode(m.group(0)!) as Map<String, dynamic>;
+            } catch (_) {}
+        }
+        if (parsed != null && parsed['ids'] is List) {
+          final ids =
+              (parsed['ids'] as List)
+                  .cast<String>()
+                  .where((k) => k.contains('||'))
+                  .toSet();
+          if (ids.isNotEmpty) return ids;
+        }
+      }
+    } catch (e) {
+      debugPrint('[AUTOBIO] _smartSelectSousThemes erreur: $e');
+    }
+    return null;
+  }
 
-      if (!mounted) return;
-
-      final chapterData = {
-        'number': chapterNumber,
-        'content': newContent,
-        'themesUsed': selectedThemeIds ?? ['all'],
-        'lastUpdated': FieldValue.serverTimestamp(),
-      };
-
-      await _firestore
-          .collection('users')
-          .doc(_currentUser!.uid)
-          .collection('chapters')
-          .doc('chapter_$chapterNumber')
-          .set(chapterData, SetOptions(merge: true));
-      WriteBatch batch = _firestore.batch();
-      for (final ref in elementRefs) {
-        batch.update(ref, {'lastAnalyzedAutobiographie': Timestamp.now()});
-      }
-      await batch.commit();
-      if (!_isVip) {
-        await _firestore
-            .collection('users')
-            .doc(_currentUser!.uid)
-            .set({'lastAutobiographyUpdate': FieldValue.serverTimestamp()}, SetOptions(merge: true));
-        _loadVipData();
-      }
-      if (mounted) {
-        setState(() {
-          _chaptersData[chapterNumber] = {...chapterData, 'lastUpdated': Timestamp.now()};
-          _checkThemesForUpdates();
-        });
-        messenger.showSnackBar(SnackBar(
-          content: Text('Chapitre $chapterNumber ${isUpdate ? "mis à jour" : "généré"} avec succès !'),
-          backgroundColor: Colors.green,
-        ));
-      }
-    } catch (e, stackTrace) {
-      print("--- Erreur dans la génération: $e\n$stackTrace ---");
-      if (mounted) {
-        messenger.showSnackBar(
-          SnackBar(content: Text('Une erreur est survenue lors de la génération: $e')),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _generatingChapterNumber = null);
-      }
+  Future<Set<String>?> _resolveEffectiveKeys({
+    required _ContentMode mode,
+    required Set<String> sousThemeKeys,
+    required String customPrompt,
+  }) async {
+    switch (mode) {
+      case _ContentMode.allThemes:
+        return null;
+      case _ContentMode.specificThemes:
+        return sousThemeKeys.isEmpty ? null : sousThemeKeys;
+      case _ContentMode.custom:
+        if (customPrompt.isEmpty) return null;
+        return await _smartSelectSousThemes(customPrompt);
     }
   }
-  Future<Map<String, dynamic>> _fetchChapterElements(
-      List<String>? themeIds, {
-        required bool isUpdate,
-      }) async {
-    if (_currentUser == null) return {'data': [], 'refs': []};
 
-    List<Map<String, dynamic>> elements = [];
-    List<DocumentReference> elementRefs = [];
-    final categoriesRef = _firestore
-        .collection('users')
-        .doc(_currentUser!.uid)
-        .collection('categories_elements');
+  // ═════════════════════════════════════════════════════════════════════════
+  // RÉCUPÉRATION DES ÉLÉMENTS
+  // ═════════════════════════════════════════════════════════════════════════
 
-    List<DocumentSnapshot> categoryDocs;
-    if (themeIds == null) {
-      categoryDocs = (await categoriesRef.get()).docs;
-    } else {
-      final futures = themeIds.map((id) => categoriesRef.doc(id).get()).toList();
-      categoryDocs = (await Future.wait(futures)).where((doc) => doc.exists).toList();
-    }
-
-    for (var categoryDoc in categoryDocs) {
-      Query elementsQuery = categoryDoc.reference.collection('elements');
-      if (isUpdate) {
-        elementsQuery = elementsQuery.where('lastAnalyzedAutobiographie', isEqualTo: null);
+  Future<_FetchResult> _fetchElements({
+    required Set<String>? effectiveKeys,
+    required bool onlyNew,
+  }) async {
+    if (_user == null) return _FetchResult([], []);
+    final elements = <Map<String, dynamic>>[];
+    final refs = <DocumentReference>[];
+    Map<String, Set<String>>? themeFilter;
+    if (effectiveKeys != null) {
+      themeFilter = {};
+      for (final key in effectiveKeys) {
+        final parts = key.split('||');
+        if (parts.length == 2) (themeFilter[parts[0]] ??= {}).add(parts[1]);
       }
-      final elementsSnapshot = await elementsQuery.get();
-
-      for (var elementDoc in elementsSnapshot.docs) {
-        final elementData = elementDoc.data();
-        if (elementData is Map<String, dynamic>) {
-          String sourceInfo = '';
-          if (elementData['isRepost'] == true && elementData['repostedFromUserName'] != null) {
-            sourceInfo = " (Cet élément a été republié par l'utilisateur à partir d'un contenu de ${elementData['repostedFromUserName']}).";
+    }
+    final themesRef = _db
+        .collection('users')
+        .doc(_user!.uid)
+        .collection('themes_biographiques');
+    final List<DocumentSnapshot> themeDocs;
+    if (themeFilter == null) {
+      themeDocs = (await themesRef.get()).docs;
+    } else {
+      final futures =
+          themeFilter.keys.map((id) => themesRef.doc(id).get()).toList();
+      themeDocs = (await Future.wait(futures)).where((d) => d.exists).toList();
+    }
+    for (final themeDoc in themeDocs) {
+      final themeData = themeDoc.data() as Map<String, dynamic>? ?? {};
+      final themeNom = themeData['nom'] as String? ?? themeDoc.id;
+      final allowedSousThemes = themeFilter?[themeDoc.id];
+      final stSnap = await themeDoc.reference.collection('sous_themes').get();
+      for (final stDoc in stSnap.docs) {
+        if (allowedSousThemes != null && !allowedSousThemes.contains(stDoc.id))
+          continue;
+        final stData = stDoc.data() as Map<String, dynamic>? ?? {};
+        final stNom = stData['nom'] as String? ?? stDoc.id;
+        Query q = stDoc.reference.collection('extraits');
+        if (onlyNew) q = q.where('lastAnalyzedAutobiographie', isEqualTo: null);
+        final extraitsSnap = await q.get();
+        for (final extraitDoc in extraitsSnap.docs) {
+          final data = extraitDoc.data() as Map<String, dynamic>? ?? {};
+          final texte = data['texte'] as String? ?? '';
+          if (texte.isEmpty) continue;
+          elements.add({
+            'texte': texte,
+            'label': '[$themeNom — $stNom]',
+            'date':
+                data['date'] is Timestamp
+                    ? (data['date'] as Timestamp).toDate()
+                    : DateTime.now(),
+          });
+          refs.add(extraitDoc.reference);
+        }
+      }
+    }
+    if (effectiveKeys == null) {
+      try {
+        final souvenirSnap =
+            await _db
+                .collection('souvenirs')
+                .where('userId', isEqualTo: _user!.uid)
+                .get();
+        for (final doc in souvenirSnap.docs) {
+          final data = doc.data() as Map<String, dynamic>? ?? {};
+          final texte = data['texte'] as String? ?? '';
+          if (texte.isEmpty) continue;
+          String qualLabel;
+          switch (data['qualite'] as String? ?? '') {
+            case 'SouvenirQualite.nostalgie':
+              qualLabel = 'Nostalgie';
+              break;
+            case 'SouvenirQualite.jamaisOublie':
+              qualLabel = 'Jamais oublié';
+              break;
+            case 'SouvenirQualite.bonheur':
+              qualLabel = 'Bonheur';
+              break;
+            default:
+              qualLabel = 'Souvenir';
           }
           elements.add({
-            'texte': elementData['texte'] ?? '',
-            'explication': (elementData['explication'] ?? '') + sourceInfo,
-            'date': (elementData['date'] as Timestamp).toDate(),
-            'photoUrls': await _getPhotoUrlsForElement(elementData),
+            'texte': texte,
+            'label': '[Souvenir — $qualLabel]',
+            'date':
+                data['date'] is Timestamp
+                    ? (data['date'] as Timestamp).toDate()
+                    : DateTime.now(),
           });
-          elementRefs.add(elementDoc.reference);
         }
+      } catch (e) {
+        debugPrint('[AUTOBIO] Souvenirs erreur: $e');
       }
     }
-    return {'data': elements, 'refs': elementRefs};
+    elements.sort(
+      (a, b) => (a['date'] as DateTime).compareTo(b['date'] as DateTime),
+    );
+    return _FetchResult(elements, refs);
   }
 
-  Future<List<String>> _getPhotoUrlsForElement(Map<String, dynamic> elementData) async {
-    if (elementData['date'] is Timestamp) {
-      final elementDate = (elementData['date'] as Timestamp).toDate();
-      final dayStart = DateTime(elementDate.year, elementDate.month, elementDate.day);
-      final dayEnd = dayStart.add(const Duration(days: 1));
-
-      final querySnapshot = await _firestore
-          .collection('journees')
-          .where('userId', isEqualTo: _currentUser!.uid)
-          .where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(dayStart))
-          .where('date', isLessThan: Timestamp.fromDate(dayEnd))
-          .get();
-
-      final List<String> photoUrls = [];
-      for (var doc in querySnapshot.docs) {
-        final journeeData = doc.data();
-        if (journeeData.containsKey('photoUrls') && journeeData['photoUrls'] is List) {
-          photoUrls.addAll(List<String>.from(journeeData['photoUrls']));
-        }
-      }
-      return photoUrls.toSet().toList();
-    }
-    return [];
+  String _formatElementsForPrompt(List<Map<String, dynamic>> elements) {
+    return elements
+        .map((e) {
+          final dateStr = DateFormat(
+            'dd/MM/yyyy',
+          ).format(e['date'] as DateTime);
+          return '- [$dateStr] ${e['texte']} ${e['label']}';
+        })
+        .join('\n');
   }
 
-  Future<String> _generateChapterContent({
+  // ═════════════════════════════════════════════════════════════════════════
+  // APPEL API – TEXTE PUR (pas de balises image)
+  // ═════════════════════════════════════════════════════════════════════════
+
+  Future<String> _callGenerationApi({
     required int chapterNumber,
-    required List<Map<String, dynamic>> elements,
+    required String formattedElements,
     required String previousChapterContent,
     String? existingContent,
-    String? generalPrompt,
+    required String customPrompt,
   }) async {
-    const apiUrl = 'https://api.deepseek.com/v1/chat/completions';
+    final isUpdate = existingContent != null && existingContent.isNotEmpty;
+    final customSection =
+        customPrompt.isNotEmpty
+            ? '\n\n**INSTRUCTION SPÉCIFIQUE (PRIORITÉ ABSOLUE) :**\n"$customPrompt"\nTu DOIS obéir à cette instruction.'
+            : '';
+    final existingSection =
+        isUpdate
+            ? '\n\n**Version actuelle du Chapitre $chapterNumber :**\n$existingContent'
+            : '';
 
-    final formattedElements = elements.map((e) {
-      String imageInfo = '';
-      if (e['photoUrls'] != null && (e['photoUrls'] as List).isNotEmpty) {
-        imageInfo = " (Images associées à cet événement: ${e['photoUrls'].map((url) => '[IMAGE_URL:$url]').join(', ')})";
-      }
-      return "- ${e['texte']}: ${e['explication']}$imageInfo";
-    }).join('\n');
+    final prompt = '''
+Tu es un écrivain et biographe talentueux de langue maternelle FRANÇAISE.
+Rédige un chapitre d\'autobiographie de manière engageante, fluide et émotive, à la première personne ("je").
+ 
+**IL EST IMPÉRATIF QUE TA RÉPONSE SOIT EXCLUSIVEMENT EN FRANÇAIS.**
+**Produis UNIQUEMENT du texte narratif. PAS de balises, PAS de marqueurs spéciaux, PAS d\'URLs.**
+ 
+**Éléments de vie à intégrer :**
+$formattedElements
+ 
+**Contexte chapitre précédent (Chapitre ${chapterNumber - 1}) :**
+${previousChapterContent.isEmpty ? "Premier chapitre." : previousChapterContent}
+$existingSection$customSection
+ 
+**Instructions :**
+- **Tâche :** ${isUpdate ? "Mets à jour et enrichis ce chapitre avec les nouveaux éléments." : "Écris"} le **Chapitre $chapterNumber**.
+- **Style :** Narratif, personnel, à la première personne ("je"). Cohérent avec le contexte précédent.
+- **Format :** Produis uniquement le texte du chapitre, sans titre ni commentaire. Texte pur uniquement.
+''';
 
-    final bool isUpdate = existingContent != null && existingContent.isNotEmpty;
-
-    final generalPromptSection = (generalPrompt != null && generalPrompt.isNotEmpty)
-        ? """
-    4.  **Instruction générale de l'utilisateur (à suivre pour l'ensemble du récit) :**
-        $generalPrompt
-    """
-        : "";
-
-    final prompt = """
-    Tu es un écrivain et biographe talentueux. Ta mission est de rédiger un chapitre d'une autobiographie de manière engageante, fluide et émotive, à la première personne ("je").
-
-    Voici les informations à ta disposition :
-
-    1.  **Éléments de vie à intégrer :**
-        $formattedElements
-
-    2.  **Contexte du chapitre précédent (Chapitre ${chapterNumber - 1}) :**
-        ${previousChapterContent.isEmpty ? "C'est le premier chapitre. Commence par une introduction appropriée." : previousChapterContent}
-
-    ${isUpdate ? """
-    3.  **Version actuelle du chapitre $chapterNumber à améliorer :**
-        $existingContent
-    """ : ""}
-    
-    $generalPromptSection 
-
-    **Instructions :**
-    - **Tâche :** ${isUpdate ? "Mets à jour et enrichis ce chapitre en intégrant les NOUVEAUX éléments de vie fournis." : "Écris"} le **Chapitre $chapterNumber**.
-    - **Style :** Narratif, personnel, à la première personne ("je").
-    - **Intégration :** Tisse les "Éléments de vie" (et les descriptions d'images s'il y en a) de manière naturelle. Place le marqueur `[PHOTO_FOR_PARAGRAPH_HERE:URL_DE_LA_PHOTO]` à la fin du paragraphe pertinent.
-    - **Format :** Produis uniquement le texte du chapitre, sans titre ni introduction superflue.
-    """;
-
-    final response = await http.post(
-      Uri.parse(apiUrl),
+    final resp = await http.post(
+      Uri.parse(_kApiUrl),
       headers: {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer $DEEPSEEK_API_KEY',
       },
       body: jsonEncode({
-        'model': 'deepseek-chat',
+        'model': await resolveAiModel(isVip: _isVip),
         'max_tokens': 4000,
-        'messages': [{'role': 'user', 'content': prompt}],
+        'messages': [
+          {'role': 'user', 'content': prompt},
+        ],
       }),
     );
 
-    if (response.statusCode == 200) {
-      final data = jsonDecode(utf8.decode(response.bodyBytes));
-      return data['choices'][0]['message']['content'] as String;
-    } else {
-      throw Exception(
-          'Erreur de l\'API DeepSeek: ${response.statusCode} - ${response.body}');
+    if (resp.statusCode != 200)
+      throw Exception('Erreur API ${resp.statusCode}: ${resp.body}');
+    final data = jsonDecode(utf8.decode(resp.bodyBytes));
+    return (data['choices'][0]['message']['content'] as String).trim();
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // ACTION : GÉNÉRER / RÉGÉNÉRER
+  // ═════════════════════════════════════════════════════════════════════════
+
+  Future<void> _generateChapter({
+    required int chapterNumber,
+    required _ContentMode mode,
+    required Set<String> sousThemeKeys,
+    required String customPrompt,
+    required bool isUpdate,
+  }) async {
+    if (_user == null || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() {
+      _generatingChapter = chapterNumber;
+      _pendingDiffs.remove(chapterNumber);
+    });
+    try {
+      final effectiveKeys = await _resolveEffectiveKeys(
+        mode: mode,
+        sousThemeKeys: sousThemeKeys,
+        customPrompt: customPrompt,
+      );
+      final fetchResult = await _fetchElements(
+        effectiveKeys: effectiveKeys,
+        onlyNew: isUpdate,
+      );
+      if (!mounted) return;
+      if (fetchResult.elements.isEmpty && customPrompt.isEmpty) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              isUpdate ? 'Aucun nouvel élément.' : 'Aucun élément trouvé.',
+            ),
+          ),
+        );
+        setState(() => _generatingChapter = null);
+        return;
+      }
+      final formattedElements = _formatElementsForPrompt(fetchResult.elements);
+      final previousContent =
+          _chaptersData[chapterNumber - 1]?['content'] as String? ?? '';
+      final existingContent =
+          isUpdate
+              ? (_chaptersData[chapterNumber]?['content'] as String?)
+              : null;
+      final newContent = await _callGenerationApi(
+        chapterNumber: chapterNumber,
+        formattedElements: formattedElements,
+        previousChapterContent: previousContent,
+        existingContent: existingContent,
+        customPrompt: customPrompt,
+      );
+      if (!mounted) return;
+      // Régénération → pas de diff, on enregistre directement
+      final chapterDoc = {
+        'number': chapterNumber,
+        'content': newContent,
+        'themesUsed': effectiveKeys?.toList() ?? ['all'],
+        'lastUpdated': FieldValue.serverTimestamp(),
+      };
+      await _db
+          .collection('users')
+          .doc(_user!.uid)
+          .collection('chapters')
+          .doc('chapter_$chapterNumber')
+          .set(chapterDoc, SetOptions(merge: true));
+      if (fetchResult.refs.isNotEmpty) {
+        final batch = _db.batch();
+        for (final ref in fetchResult.refs)
+          batch.update(ref, {'lastAnalyzedAutobiographie': Timestamp.now()});
+        await batch.commit();
+      }
+      if (!_isVip) {
+        await _db.collection('users').doc(_user!.uid).set({
+          'lastAutobiographyUpdate': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+        await _loadVipData();
+      }
+      if (mounted) {
+        setState(
+          () =>
+              _chaptersData[chapterNumber] = {
+                ...chapterDoc,
+                'lastUpdated': Timestamp.now(),
+              },
+        );
+        _checkThemesForUpdates();
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              'Chapitre $chapterNumber ${isUpdate ? "mis à jour" : "généré"} !',
+            ),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted)
+        messenger.showSnackBar(
+          SnackBar(content: Text('Erreur: $e'), backgroundColor: Colors.red),
+        );
+    } finally {
+      if (mounted) setState(() => _generatingChapter = null);
     }
   }
 
+  // ═════════════════════════════════════════════════════════════════════════
+  // ACTION : COMPLÉTER (ajout de texte, proposé avant acceptation)
+  // ═════════════════════════════════════════════════════════════════════════
+
+  Future<void> _completeChapter({
+    required int chapterNumber,
+    required _ContentMode mode,
+    required Set<String> sousThemeKeys,
+    required String customPrompt,
+  }) async {
+    if (_user == null || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() {
+      _completingChapter = chapterNumber;
+      _pendingDiffs.remove(chapterNumber);
+    });
+
+    try {
+      final existingContent =
+          _chaptersData[chapterNumber]?['content'] as String? ?? '';
+      final effectiveKeys = await _resolveEffectiveKeys(
+        mode: mode,
+        sousThemeKeys: sousThemeKeys,
+        customPrompt: customPrompt,
+      );
+      final fetchResult = await _fetchElements(
+        effectiveKeys: effectiveKeys,
+        onlyNew: false,
+      );
+      final instrPart =
+          customPrompt.isNotEmpty
+              ? '\n\n**INSTRUCTION SPÉCIFIQUE :**\n"$customPrompt"'
+              : '';
+      final elemCtx =
+          fetchResult.elements.isNotEmpty
+              ? '\n\n**Éléments à intégrer :**\n${_formatElementsForPrompt(fetchResult.elements)}'
+              : '';
+
+      final prompt = '''
+Tu es un écrivain biographe.
+
+Voici le Chapitre $chapterNumber actuel :
+"""
+$existingContent
+"""
+
+**MISSION :** Écris un ajout de 2 à 5 paragraphes en FRANÇAIS, à la première personne ("je").
+Tu dois LIRE le chapitre actuel et CHOISIR le meilleur endroit chronologique ou thématique pour insérer cet ajout (ça peut être au milieu, entre deux paragraphes, ou à la toute fin).
+$elemCtx$instrPart
+
+RÉPONDS STRICTEMENT AVEC CE FORMAT EXACT (utilise bien les balises) :
+
+[ANCRAGE]
+Copie-colle ici EXACTEMENT 5 à 10 mots du texte original juste APRÈS lesquels je dois insérer le nouveau texte. Ne change AUCUNE lettre, AUCUNE ponctuation.
+⚠️ RÈGLE ABSOLUE : Cet ancrage DOIT se terminer par un point (.), un point d'exclamation (!) ou un point d'interrogation (?). Ne coupe JAMAIS une phrase en plein milieu.
+(Si tu veux que l'ajout se fasse tout à la fin du chapitre, écris simplement "FIN").
+[NOUVEAU_TEXTE]
+(Rédige ton nouveau texte ici, sans guillemets ni commentaires).
+''';
+
+      debugPrint('⏳ Envoi de la requête à l\'IA...');
+
+      final resp = await http.post(
+        Uri.parse(_kApiUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $DEEPSEEK_API_KEY',
+        },
+        body: jsonEncode({
+          'model': await resolveAiModel(isVip: _isVip),
+          'max_tokens': 2000,
+          'messages': [
+            {'role': 'user', 'content': prompt},
+          ],
+        }),
+      );
+
+      if (resp.statusCode != 200)
+        throw Exception('Erreur API ${resp.statusCode}');
+      final data = jsonDecode(utf8.decode(resp.bodyBytes));
+      final raw = (data['choices'][0]['message']['content'] as String).trim();
+
+      debugPrint('\n========== LOGS IA ==========');
+      debugPrint('📝 RÉPONSE BRUTE DE L\'IA :\n$raw\n');
+
+      String anchor = "FIN";
+      String newText = raw;
+
+      if (raw.contains('[ANCRAGE]') && raw.contains('[NOUVEAU_TEXTE]')) {
+        final startAnchor = raw.indexOf('[ANCRAGE]') + '[ANCRAGE]'.length;
+        final endAnchor = raw.indexOf('[NOUVEAU_TEXTE]');
+        final startText = endAnchor + '[NOUVEAU_TEXTE]'.length;
+
+        // On nettoie l'ancrage au cas où l'IA a mis des sauts de ligne dedans
+        anchor =
+            raw.substring(startAnchor, endAnchor).replaceAll('\n', ' ').trim();
+        newText = raw.substring(startText).trim();
+      }
+
+      debugPrint('🎯 ANCRAGE EXTRAIT : "$anchor"');
+
+      // ─── FONCTION DE RECHERCHE TOLÉRANTE (FUZZY MATCH) ───
+      int findInsertionIndex(String text, String searchAnchor) {
+        if (searchAnchor == 'FIN') return text.length;
+
+        String cleanAnchor = searchAnchor.trim();
+        if (text.contains(cleanAnchor))
+          return text.indexOf(cleanAnchor) + cleanAnchor.length;
+
+        // Si la phrase exacte n'est pas trouvée (ex: l'IA a ajouté un mot au début),
+        // on coupe l'ancrage mot par mot en partant du début, et on cherche la fin.
+        List<String> words = cleanAnchor.split(RegExp(r'\s+'));
+
+        // On exige au moins 3 mots correspondants pour éviter de couper n'importe où
+        for (int i = 0; i <= words.length - 3; i++) {
+          String subAnchor = words.sublist(i).join(' ');
+
+          // Recherche exacte du morceau
+          if (text.contains(subAnchor))
+            return text.indexOf(subAnchor) + subAnchor.length;
+
+          // Recherche en forçant la première lettre en minuscule
+          String lower = subAnchor[0].toLowerCase() + subAnchor.substring(1);
+          if (text.contains(lower)) return text.indexOf(lower) + lower.length;
+
+          // Recherche en forçant la première lettre en majuscule
+          String upper = subAnchor[0].toUpperCase() + subAnchor.substring(1);
+          if (text.contains(upper)) return text.indexOf(upper) + upper.length;
+        }
+
+        return -1; // Vraiment introuvable
+      }
+      // ────────────────────────────────────────────────────────
+
+      if (newText.isEmpty) throw Exception("L'IA n'a généré aucun texte.");
+
+      String newContent;
+      int insertPos =
+          existingContent.isEmpty
+              ? 0
+              : findInsertionIndex(existingContent, anchor);
+
+      debugPrint('🔎 INDEX D\'INSERTION TROUVÉ : $insertPos');
+      debugPrint('=============================\n');
+
+      if (insertPos == -1) {
+        debugPrint(
+          '⚠️ ATTENTION : L\'ancrage n\'a pas été trouvé du tout. Fallback -> ajout à la fin.',
+        );
+        insertPos = existingContent.length;
+        newContent =
+            existingContent.isEmpty ? newText : '$existingContent\n\n$newText';
+      } else if (insertPos == existingContent.length) {
+        debugPrint('✅ Ajout à la fin demandé ou calculé.');
+        newContent =
+            existingContent.isEmpty ? newText : '$existingContent\n\n$newText';
+      } else {
+        debugPrint(
+          '✅ SUCCÈS : Ancrage trouvé ! Découpage du texte en plein milieu...',
+        );
+        final before = existingContent.substring(0, insertPos).trimRight();
+        final after = existingContent.substring(insertPos).trimLeft();
+
+        // On insère le nouveau texte au milieu proprement
+        newContent = '$before\n\n$newText\n\n$after';
+      }
+
+      if (mounted)
+        setState(() {
+          _pendingDiffs[chapterNumber] = _ChapterDiff(
+            originalContent: existingContent,
+            newContent: newContent,
+            insertOffset: insertPos,
+            insertedText: newText,
+          );
+        });
+    } catch (e) {
+      if (mounted)
+        messenger.showSnackBar(
+          SnackBar(content: Text('Erreur : $e'), backgroundColor: Colors.red),
+        );
+    } finally {
+      if (mounted) setState(() => _completingChapter = null);
+    }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // ACTION : RÉÉCRIRE UN PASSAGE SÉLECTIONNÉ
+  // ═════════════════════════════════════════════════════════════════════════
+
+  String _norm(String s) =>
+      s.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
+
+  Future<void> _rewriteSelection({
+    required int chapterNumber,
+    required String selectedText,
+    required _ContentMode mode,
+    required Set<String> sousThemeKeys,
+    required String customPrompt,
+  }) async {
+    if (_user == null) return;
+    setState(() {
+      _rewritingChapter = chapterNumber;
+      _pendingDiffs.remove(chapterNumber);
+    });
+
+    // MODIFICATION : J'ai supprimé le showDialog(...) bloquant qui prenait toute la page
+
+    try {
+      final existingContent =
+          _chaptersData[chapterNumber]?['content'] as String? ?? '';
+      final rawIdx = existingContent.indexOf(selectedText);
+      if (rawIdx == -1)
+        throw Exception('Passage introuvable. Veuillez resélectionner.');
+
+      final effectiveKeys = await _resolveEffectiveKeys(
+        mode: mode,
+        sousThemeKeys: sousThemeKeys,
+        customPrompt: customPrompt,
+      );
+      final fetchResult = await _fetchElements(
+        effectiveKeys: effectiveKeys,
+        onlyNew: false,
+      );
+      final elemCtx =
+          fetchResult.elements.isNotEmpty
+              ? '\n\n**Éléments de vie à intégrer :**\n${_formatElementsForPrompt(fetchResult.elements)}'
+              : '';
+      final instrLine =
+          customPrompt.isNotEmpty
+              ? '\n\n**INSTRUCTION SPÉCIFIQUE :**\n"$customPrompt"'
+              : '';
+
+      final ctxStart = (rawIdx - 300).clamp(0, existingContent.length);
+      final ctxEnd = (rawIdx + selectedText.length + 300).clamp(
+        0,
+        existingContent.length,
+      );
+      final ctxBefore = existingContent.substring(ctxStart, rawIdx).trim();
+      final ctxAfter =
+          existingContent
+              .substring(rawIdx + selectedText.length, ctxEnd)
+              .trim();
+
+      final systemMsg =
+          'Tu es un écrivain biographe en français. Réécris UNIQUEMENT le passage indiqué, à la première personne ("je"), en FRANÇAIS. Produis un texte NOUVEAU et ENRICHI. Réponds UNIQUEMENT avec le nouveau texte réécrit. Texte pur, pas de balises.';
+      final userMsg =
+          'Réécris et enrichis ce passage en FRANÇAIS :\n"$selectedText"\n\nContexte avant :\n$ctxBefore\n\nContexte après :\n$ctxAfter\n\nRédige UNIQUEMENT la réécriture.$elemCtx$instrLine';
+
+      String? replacement;
+      final temps = [0.4, 0.7, 1.0];
+      for (int attempt = 0; attempt < temps.length; attempt++) {
+        final resp = await http.post(
+          Uri.parse(_kApiUrl),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $DEEPSEEK_API_KEY',
+          },
+          body: jsonEncode({
+            'model': await resolveAiModel(isVip: _isVip),
+            'max_tokens': 2000,
+            'temperature': temps[attempt],
+            'messages': [
+              {'role': 'system', 'content': systemMsg},
+              {'role': 'user', 'content': userMsg},
+            ],
+          }),
+        );
+        if (resp.statusCode != 200)
+          throw Exception('Erreur API ${resp.statusCode}');
+        final respData = jsonDecode(utf8.decode(resp.bodyBytes));
+        final candidate =
+            (respData['choices'][0]['message']['content'] as String).trim();
+        final tooShort =
+            candidate.length <
+            (selectedText.length * 0.1).round().clamp(20, 80);
+        final isCopy = _norm(candidate) == _norm(selectedText);
+        if (!tooShort && !isCopy) {
+          replacement = candidate;
+          break;
+        }
+      }
+      if (replacement == null)
+        throw Exception('Réécriture invalide après 3 tentatives.');
+
+      final newContent =
+          existingContent.substring(0, rawIdx) +
+          replacement +
+          existingContent.substring(rawIdx + selectedText.length);
+
+      if (mounted) {
+        setState(() {
+          _pendingDiffs[chapterNumber] = _ChapterDiff(
+            originalContent: existingContent,
+            newContent: newContent,
+            replacedText: selectedText,
+            replacementText: replacement!,
+          );
+          _selectedTextByChapter.remove(chapterNumber);
+        });
+        // MODIFICATION : J'ai retiré le Navigator.pop() car il n'y a plus de dialog à fermer
+      }
+    } catch (e) {
+      if (mounted) {
+        // MODIFICATION : J'ai retiré le Navigator.pop() ici aussi
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erreur : $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _rewritingChapter = null);
+    }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // ACCEPTER / REFUSER LE DIFF
+  // ═════════════════════════════════════════════════════════════════════════
+
+  Future<void> _acceptDiff(int chapterNumber) async {
+    final diff = _pendingDiffs[chapterNumber];
+    if (diff == null || _user == null) return;
+    try {
+      await _db
+          .collection('users')
+          .doc(_user!.uid)
+          .collection('chapters')
+          .doc('chapter_$chapterNumber')
+          .set({
+            'content': diff.newContent,
+            'lastUpdated': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+      if (!_isVip) {
+        await _db.collection('users').doc(_user!.uid).set({
+          'lastAutobiographyUpdate': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+        await _loadVipData();
+      }
+      if (mounted) {
+        setState(() {
+          _chaptersData[chapterNumber] = {
+            ...(_chaptersData[chapterNumber] ?? {}),
+            'content': diff.newContent,
+          };
+          _pendingDiffs.remove(chapterNumber);
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Modification acceptée !'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erreur : $e'), backgroundColor: Colors.red),
+        );
+    }
+  }
+
+  void _rejectDiff(int chapterNumber) {
+    setState(() => _pendingDiffs.remove(chapterNumber));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Modification annulée.'),
+        backgroundColor: Colors.orange,
+      ),
+    );
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // OUVERTURE DU DIALOG DE SÉLECTION DE THÈMES
+  // ═════════════════════════════════════════════════════════════════════════
+
+  void _openThemeDialog(int chapterNumber, {String? selectedText}) {
+    showDialog(
+      context: context,
+      builder:
+          (ctx) => _ThemeSelectionDialog(
+            chapterNumber: chapterNumber,
+            chapterExists: _chaptersData.containsKey(chapterNumber),
+            isDarkMode: Theme.of(context).brightness == Brightness.dark,
+            availableCategories: _availableCategories,
+            themeHasUpdates: _themeHasUpdates,
+            sousThemesParTheme: _sousThemesParTheme,
+            sousThemeHasUpdates: _sousThemeHasUpdates,
+            selectedText: selectedText,
+            messenger: ScaffoldMessenger.of(context),
+            onGenerate:
+                ({
+                  required mode,
+                  required sousThemeKeys,
+                  required customPrompt,
+                  required isUpdate,
+                }) => _generateChapter(
+                  chapterNumber: chapterNumber,
+                  mode: mode,
+                  sousThemeKeys: sousThemeKeys,
+                  customPrompt: customPrompt,
+                  isUpdate: isUpdate,
+                ),
+            onComplete:
+                ({
+                  required mode,
+                  required sousThemeKeys,
+                  required customPrompt,
+                }) => _completeChapter(
+                  chapterNumber: chapterNumber,
+                  mode: mode,
+                  sousThemeKeys: sousThemeKeys,
+                  customPrompt: customPrompt,
+                ),
+            onRewrite:
+                ({
+                  required selectedText,
+                  required mode,
+                  required sousThemeKeys,
+                  required customPrompt,
+                }) => _rewriteSelection(
+                  chapterNumber: chapterNumber,
+                  selectedText: selectedText,
+                  mode: mode,
+                  sousThemeKeys: sousThemeKeys,
+                  customPrompt: customPrompt,
+                ),
+          ),
+    );
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // INSERTION DE TAG IMAGE AU CURSEUR
+  // ═════════════════════════════════════════════════════════════════════════
+
+  void _insertImageTagInText(int chapterNumber, String url) {
+    final controller = _editControllers[chapterNumber];
+    if (controller == null) return;
+
+    final tag = '\n\n[IMAGE:$url]\n\n';
+    final text = controller.text;
+    final selection = controller.selection;
+
+    if (selection.isValid && selection.start >= 0) {
+      // Insère la balise là où se trouve le curseur
+      final newText = text.replaceRange(selection.start, selection.end, tag);
+      controller.value = TextEditingValue(
+        text: newText,
+        selection: TextSelection.collapsed(
+          offset: selection.start + tag.length,
+        ),
+      );
+    } else {
+      // Si le curseur n'est pas placé, on ajoute à la fin
+      controller.text = text + tag;
+    }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // UPLOAD D'IMAGE (édition manuelle)
+  // ═════════════════════════════════════════════════════════════════════════
+
+  Future<void> _pickAndUploadImage(int chapterNumber) async {
+    final picker = ImagePicker();
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder:
+          (ctx) => SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.photo_library),
+                  title: const Text('Galerie'),
+                  onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.camera_alt),
+                  title: const Text('Appareil photo'),
+                  onTap: () => Navigator.pop(ctx, ImageSource.camera),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.cloud),
+                  title: const Text('Depuis Firebase (souvenirs/journées)'),
+                  onTap: () async {
+                    Navigator.pop(ctx);
+                    await _pickFirebaseImage(chapterNumber);
+                  },
+                ),
+              ],
+            ),
+          ),
+    );
+    if (source == null) return;
+    final XFile? file = await picker.pickImage(
+      source: source,
+      imageQuality: 85,
+    );
+    if (file == null) return;
+    try {
+      final ref = FirebaseStorage.instance.ref().child(
+        'autobio_images/${_user!.uid}/${DateTime.now().millisecondsSinceEpoch}.jpg',
+      );
+      await ref.putFile(File(file.path));
+      final url = await ref.getDownloadURL();
+      _insertImageTagInText(chapterNumber, url);
+    } catch (e) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erreur upload: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+    }
+  }
+
+  Future<void> _pickFirebaseImage(int chapterNumber) async {
+    if (_user == null) return;
+    // Récupérer toutes les URLs photos des journées et souvenirs de l'utilisateur
+    final List<String> allUrls = [];
+    try {
+      final jSnap =
+          await _db
+              .collection('journees')
+              .where('userId', isEqualTo: _user!.uid)
+              .get();
+      for (final doc in jSnap.docs) {
+        final urls = doc.data()['photoUrls'];
+        if (urls is List) allUrls.addAll(List<String>.from(urls));
+      }
+      final sSnap =
+          await _db
+              .collection('souvenirs')
+              .where('userId', isEqualTo: _user!.uid)
+              .get();
+      for (final doc in sSnap.docs) {
+        final urls = doc.data()['photoUrls'];
+        if (urls is List) allUrls.addAll(List<String>.from(urls));
+      }
+    } catch (_) {}
+
+    if (!mounted) return;
+    if (allUrls.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Aucune photo trouvée dans Firebase.')),
+      );
+      return;
+    }
+
+    final String? selected = await showDialog<String>(
+      context: context,
+      builder:
+          (ctx) => AlertDialog(
+            title: const Text('Choisir une photo'),
+            content: SizedBox(
+              width: double.maxFinite,
+              height: 400,
+              child: GridView.builder(
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 3,
+                  crossAxisSpacing: 4,
+                  mainAxisSpacing: 4,
+                ),
+                itemCount: allUrls.length,
+                itemBuilder:
+                    (_, i) => GestureDetector(
+                      onTap: () => Navigator.pop(ctx, allUrls[i]),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.network(
+                          allUrls[i],
+                          fit: BoxFit.cover,
+                          errorBuilder:
+                              (_, __, ___) => const Icon(Icons.broken_image),
+                        ),
+                      ),
+                    ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Annuler'),
+              ),
+            ],
+          ),
+    );
+    if (selected != null && mounted) {
+      _insertImageTagInText(chapterNumber, selected);
+    }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // BUILD PRINCIPAL
+  // ═════════════════════════════════════════════════════════════════════════
+
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bgColor = isDark ? const Color(0xFF121212) : Colors.white;
+
     return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      shape:
+          _isFullScreen
+              ? const RoundedRectangleBorder()
+              : RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       elevation: 8,
+      backgroundColor: Colors.transparent,
+      insetPadding:
+          _isFullScreen
+              ? EdgeInsets.zero
+              : const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
       child: Container(
         constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.9,
-          maxHeight: MediaQuery.of(context).size.height * 0.85,
+          maxWidth:
+              _isFullScreen
+                  ? MediaQuery.of(context).size.width
+                  : MediaQuery.of(context).size.width * 0.9,
+          maxHeight:
+              _isFullScreen
+                  ? MediaQuery.of(context).size.height
+                  : MediaQuery.of(context).size.height * 0.85,
         ),
-        padding: const EdgeInsets.all(20),
+        padding:
+            _isFullScreen
+                ? const EdgeInsets.symmetric(horizontal: 20, vertical: 16)
+                : const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Colors.blue.shade50, Colors.white],
-          ),
+          color: bgColor,
+          borderRadius:
+              _isFullScreen ? BorderRadius.zero : BorderRadius.circular(16),
         ),
         child: Column(
           children: [
-            _buildDialogHeader(),
-            const Divider(height: 24, thickness: 1, color: Colors.blueAccent),
-            if (_isVip) _buildGeneralPromptField(),
+            _buildHeader(isDark),
+            Divider(
+              height: 24,
+              color: isDark ? Colors.blue.shade700 : Colors.blueAccent,
+            ),
             Expanded(
-              child: (_isLoadingChapters || _isLoadingCategories)
-                  ? const Center(child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.blue)))
-                  : _buildChaptersList(),
+              child:
+                  (_isLoadingChapters || _isLoadingCategories)
+                      ? const Center(
+                        child: CircularProgressIndicator(
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            Colors.blue,
+                          ),
+                        ),
+                      )
+                      : (_showThemesView
+                          ? _buildThemesView(isDark)
+                          : _buildChapterList(isDark)),
             ),
           ],
         ),
@@ -777,238 +2108,142 @@ class _AutobiographieDialogState extends State<AutobiographieDialog> {
     );
   }
 
-  Widget _buildGeneralPromptField() {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16.0),
-      child: TextField(
-        controller: _promptController,
-        maxLines: 3,
-        decoration: InputDecoration(
-          labelText: "Instruction générale pour l'IA (VIP)",
-          hintText: "Ex: 'Je veux que tu parles de mes passions dans les chapitres 1 et 2...'",
-          border: const OutlineInputBorder(),
-          suffixIcon: IconButton(
-            icon: const Icon(Icons.save, color: Colors.green),
-            onPressed: _saveGeneralPrompt,
-            tooltip: "Sauvegarder l'instruction",
-          ),
-        ),
-      ),
-    );
-  }
+  // ── Header ────────────────────────────────────────────────────────────────
 
-  Widget _buildDialogHeader() {
+  Widget _buildHeader(bool isDark) {
+    final tc = isDark ? Colors.blue.shade300 : Colors.blue;
+    final ic = isDark ? Colors.blue.shade400 : Colors.blue[700];
+    final closeColor = isDark ? Colors.red.shade300 : Colors.redAccent;
+    final secondary = isDark ? Colors.grey[400] : Colors.grey;
+
     return Column(
       children: [
         Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Row(
-              children: [
-                Icon(Icons.auto_stories, color: Colors.blue[700], size: 28),
-                const SizedBox(width: 12),
-                const Text(
-                  'Mon Autobiographie',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.blue),
-                ),
-              ],
+            Expanded(
+              child: Row(
+                children: [
+                  Icon(Icons.auto_stories, color: ic, size: 28),
+                  const SizedBox(width: 12),
+                  Flexible(
+                    child: Text(
+                      'Mon Autobiographie',
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: tc,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
             ),
             IconButton(
-              icon: const Icon(Icons.close, color: Colors.redAccent),
+              icon: Icon(
+                _isFullScreen ? Icons.close_fullscreen : Icons.open_in_full,
+                color: ic,
+              ),
+              onPressed: () => setState(() => _isFullScreen = !_isFullScreen),
+            ),
+            IconButton(
+              icon: Icon(Icons.close, color: closeColor),
               onPressed: () => Navigator.of(context).pop(),
             ),
           ],
         ),
         const SizedBox(height: 12),
         _isLoadingVisibility
-            ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(strokeWidth: 2))
+            ? const SizedBox(
+              height: 24,
+              width: 24,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
             : Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  'Privé',
+                  style: TextStyle(
+                    color: _isAutobiographiePublic ? secondary : Colors.red,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Switch(
+                  value: _isAutobiographiePublic,
+                  onChanged: _toggleVisibility,
+                  activeColor: Colors.green,
+                  inactiveThumbColor: Colors.red,
+                ),
+                Text(
+                  'Public',
+                  style: TextStyle(
+                    color: _isAutobiographiePublic ? Colors.green : secondary,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+        const SizedBox(height: 10),
+        Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text('Privé', style: TextStyle(color: _isAutobiographiePublic ? Colors.grey : Colors.red, fontWeight: FontWeight.bold)),
-            Switch(
-              value: _isAutobiographiePublic,
-              onChanged: _toggleVisibility,
-              activeColor: Colors.green,
-              inactiveThumbColor: Colors.red,
+            _viewTab(
+              Icons.auto_stories,
+              'Chapitres',
+              !_showThemesView,
+              isDark,
+              () => setState(() => _showThemesView = false),
             ),
-            Text('Public', style: TextStyle(color: _isAutobiographiePublic ? Colors.green : Colors.grey, fontWeight: FontWeight.bold)),
+            const SizedBox(width: 8),
+            _viewTab(
+              Icons.account_tree,
+              'Thèmes',
+              _showThemesView,
+              isDark,
+              () => setState(() => _showThemesView = true),
+            ),
           ],
         ),
       ],
     );
   }
 
-  Widget _buildChaptersList() {
-    final chapterCount = _chaptersData.keys.isNotEmpty
-        ? (_chaptersData.keys.reduce((a, b) => a > b ? a : b)) + 1
-        : 1;
-
-    return ListView.builder(
-      itemCount: chapterCount,
-      itemBuilder: (context, index) {
-        final chapterNumber = index + 1;
-        final chapterData = _chaptersData[chapterNumber];
-        return _buildChapterCard(
-          chapterNumber: chapterNumber,
-          chapterData: chapterData,
-        );
-      },
-    );
-  }
-
-  Widget _buildChapterCard({
-    required int chapterNumber,
-    Map<String, dynamic>? chapterData,
-  }) {
-    final bool chapterExists = chapterData != null;
-    final bool isGenerating = _generatingChapterNumber == chapterNumber;
-    final themesUsed = chapterData?['themesUsed'] as List<dynamic>?;
-    final chapterContent = chapterExists ? (chapterData['content'] as String) : '';
-
-    final RegExp imageMarkerRegex = RegExp(r'\[PHOTO_FOR_PARAGRAPH_HERE:(https?:\/\/[^\s\]]+)\]');
-
-    final List<Widget> contentWidgets = [];
-    if (chapterExists) {
-      List<String> paragraphs = chapterContent.split(imageMarkerRegex);
-      Iterable<Match> matches = imageMarkerRegex.allMatches(chapterContent);
-
-      for (int i = 0; i < paragraphs.length; i++) {
-        String paragraph = paragraphs[i];
-        if (paragraph.trim().isNotEmpty) {
-          contentWidgets.add(
-            Text(
-              paragraph.trim(),
-              style: TextStyle(height: 1.6, fontSize: 15, color: Colors.grey[800]),
-            ),
-          );
-          contentWidgets.add(const SizedBox(height: 10));
-        }
-
-        if (i < matches.length) {
-          final Match match = matches.elementAt(i);
-          final String imageUrl = match.group(1)!;
-
-          if (imageUrl.isNotEmpty) {
-            contentWidgets.add(
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 10.0),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: Image.network(
-                    imageUrl,
-                    width: double.infinity,
-                    height: 200,
-                    fit: BoxFit.cover,
-                    loadingBuilder: (context, child, loadingProgress) {
-                      if (loadingProgress == null) return child;
-                      return Container(
-                        height: 200,
-                        color: Colors.grey[200],
-                        child: Center(
-                          child: CircularProgressIndicator(
-                            value: loadingProgress.expectedTotalBytes != null
-                                ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
-                                : null,
-                            valueColor: const AlwaysStoppedAnimation<Color>(Colors.blue),
-                          ),
-                        ),
-                      );
-                    },
-                    errorBuilder: (context, error, stackTrace) {
-                      return Container(
-                        height: 200,
-                        color: Colors.grey[200],
-                        child: const Icon(Icons.broken_image, size: 50, color: Colors.grey),
-                      );
-                    },
-                  ),
-                ),
-              ),
-            );
-            contentWidgets.add(const SizedBox(height: 10));
-          }
-        }
-      }
-    }
-
-    String buttonTooltip = '';
-    if (!_canUpdateAutobio) {
-      final remainingDays = 7 - DateTime.now().difference(_lastAutobioUpdate!).inDays;
-      buttonTooltip = 'Attendez encore $remainingDays jour(s)';
-    }
-
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 20),
-      elevation: 4,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      color: Colors.white,
-      child: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _viewTab(
+    IconData icon,
+    String label,
+    bool selected,
+    bool isDark,
+    VoidCallback onTap,
+  ) {
+    final sel = isDark ? Colors.blue.shade300 : Colors.blue;
+    final unsel = isDark ? Colors.grey.shade600 : Colors.grey.shade400;
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
+        decoration: BoxDecoration(
+          color:
+              selected
+                  ? (isDark
+                      ? Colors.blue.shade900.withOpacity(0.4)
+                      : Colors.blue.shade50)
+                  : Colors.transparent,
+          border: Border.all(color: selected ? sel : unsel),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Text('Chapitre $chapterNumber',
-                style: const TextStyle(
-                    fontSize: 20, fontWeight: FontWeight.bold, color: Colors.blue)),
-            const SizedBox(height: 12),
-
-            if (themesUsed != null && themesUsed.isNotEmpty)
-              Wrap(
-                spacing: 8,
-                runSpacing: 4,
-                children: (themesUsed.contains('all')
-                    ? [Chip(label: const Text('Tous les thèmes'), backgroundColor: Colors.lightBlue.shade100)]
-                    : themesUsed
-                    .map((id) =>
-                    Chip(label: Text(_categoryNames[id] ?? 'Thème Inconnu'), backgroundColor: Colors.lightBlue.shade100))
-                    .toList()),
-              ),
-            if (themesUsed != null && themesUsed.isNotEmpty) const SizedBox(height: 12),
-
-            if (isGenerating)
-              const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(32.0),
-                    child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.blue)),
-                  ))
-            else if (chapterExists)
-              ...contentWidgets
-            else
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 20.0),
-                child: Center(
-                  child: Text(
-                    'Ce chapitre n\'a pas encore été généré.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.grey[600], fontStyle: FontStyle.italic),
-                  ),
-                ),
-              ),
-
-            const SizedBox(height: 16),
-
-            Align(
-              alignment: Alignment.centerRight,
-              child: Tooltip(
-                message: buttonTooltip,
-                child: ElevatedButton.icon(
-                  icon: Icon(chapterExists ? Icons.edit_note : Icons.auto_fix_high),
-                  label: Text(chapterExists ? 'Éditer les thèmes' : 'Générer'),
-                  onPressed: (isGenerating || !_canUpdateAutobio)
-                      ? null
-                      : () => _promptForThemeSelection(chapterNumber),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue.shade700,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(25)),
-                    padding:
-                    const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                    elevation: 5,
-                  ),
-                ),
+            Icon(icon, size: 15, color: selected ? sel : unsel),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+                color: selected ? sel : unsel,
               ),
             ),
           ],
@@ -1016,819 +2251,1283 @@ class _AutobiographieDialogState extends State<AutobiographieDialog> {
       ),
     );
   }
-}
 
-class MovingSouvenirCard extends StatefulWidget {
-  final SouvenirModel souvenir;
-  final String design;
-  final String size;
-  final VoidCallback onSendToBack;
-  final VoidCallback onReplaceRequest;
-  final BoxConstraints parentConstraints;
+  // ── Vue thèmes ────────────────────────────────────────────────────────────
 
-  const MovingSouvenirCard({
-    super.key,
-    required this.souvenir,
-    required this.design,
-    required this.size,
-    required this.onSendToBack,
-    required this.onReplaceRequest,
-    required this.parentConstraints,
-  });
-
-  @override
-  _MovingSouvenirCardState createState() => _MovingSouvenirCardState();
-}
-
-class _MovingSouvenirCardState extends State<MovingSouvenirCard>
-    with TickerProviderStateMixin, AutomaticKeepAliveClientMixin {
-  late AnimationController _controller;
-  late Animation<double> _fadeAnimation;
-  late Animation<double> _pulseAnimation;
-  double _positionX = 0.0;
-  double _positionY = 0.0;
-  double _velocityX = 0.0;
-  double _velocityY = 0.0;
-  double _rotation = 0.0;
-  bool _isAnimating = true;
-  int _collisionCount = 0;
-
-  double _randomOffsetX = 0.0;
-  double _randomOffsetY = 0.0;
-  double _randomFrequencyX = 1.0;
-  double _randomFrequencyY = 1.0;
-  double _randomAmplitudeX = 1.0;
-  double _randomAmplitudeY = 1.0;
-
-  static const double maxSpeed = 4.0;
-  final Random random = Random();
-
-  String _animationStyle = 'default';
-  String _animationSpeed = 'normal';
-
-  @override
-  bool get wantKeepAlive => true;
-
-  @override
-  void initState() {
-    super.initState();
-    _initializeState();
-  }
-
-// --- CORRECTION : Taille unifiée pour la carte (carré) ---
-  double get cardSize {
-    // Taille de base unifiée pour souvenirs et journées
-    double baseSize = 250.0;
-    switch (widget.size) {
-      case 'tres_petit':
-        return baseSize * 0.7;
-      case 'petit':
-        return baseSize * 0.85;
-      case 'normal':
-        return baseSize;
-      case 'gros':
-        return baseSize * 1.1;
-      default:
-        return baseSize;
-    }
-  }
-
-// Les getters pour la largeur et la hauteur utilisent maintenant la même taille
-  double get cardWidth => cardSize;
-  double get cardHeight => cardSize;
-
-
-  void _initializeState() {
-    _controller = AnimationController(vsync: this);
-    _initializeRandomFloatingParams();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        _setRandomInitialPosition();
-        _loadAnimationSettings();
-      }
-    });
-    _velocityX = (random.nextDouble() - 0.5) * maxSpeed;
-    _velocityY = (random.nextDouble() - 0.5) * maxSpeed;
-  }
-
-  void _initializeRandomFloatingParams() {
-    _randomOffsetX = random.nextDouble() * 2 * pi;
-    _randomOffsetY = random.nextDouble() * 2 * pi;
-    _randomFrequencyX = random.nextDouble() * 0.4 + 0.8;
-    _randomFrequencyY = random.nextDouble() * 0.4 + 0.8;
-    _randomAmplitudeX = random.nextDouble() * 0.5 + 0.5;
-    _randomAmplitudeY = random.nextDouble() * 0.5 + 0.5;
-  }
-  Future<void> _loadAnimationSettings() async {
-    try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      if (!mounted) return;
-      setState(() {
-        _animationStyle = prefs.getString('cardAnimation') ?? 'default';
-        _animationSpeed = prefs.getString('animationSpeed') ?? 'normal';
-      });
-      _initializeAnimation();
-    } catch (e) {
-      print('Erreur de chargement du style d\'animation : $e');
-      _animationStyle = 'default';
-      _initializeAnimation();
-    }
-  }
-
-  void _setRandomInitialPosition() {
-    final parentWidth = widget.parentConstraints.maxWidth;
-    final parentHeight = widget.parentConstraints.maxHeight;
-
-    if (parentWidth > cardWidth && parentHeight > cardHeight) {
-      final shapePath = _getCardShape(widget.design).getOuterPath(Rect.fromLTWH(0, 0, cardWidth, cardHeight));
-      final bounds = shapePath.getBounds();
-
-      final double minX = 0 - bounds.left;
-      final double maxX = parentWidth - bounds.right;
-      final double minY = 0 - bounds.top;
-      final double maxY = parentHeight - bounds.bottom;
-
-      if (maxX > minX && maxY > minY) {
-        setState(() {
-          _positionX = minX + random.nextDouble() * (maxX - minX);
-          _positionY = minY + random.nextDouble() * (maxY - minY);
-        });
-      } else {
-        setState(() {
-          _positionX = (parentWidth - cardWidth) / 2;
-          _positionY = (parentHeight - cardHeight) / 2;
-        });
-      }
-    }
-  }
-  Duration _getAnimationDuration() {
-    switch (_animationSpeed) {
-      case 'lent':
-        return const Duration(milliseconds: 80);
-      case 'normal':
-        return const Duration(milliseconds: 50);
-      case 'rapide':
-        return const Duration(milliseconds: 30);
-      default:
-        return const Duration(milliseconds: 50);
-    }
-  }
-  double _getVelocityFactor() {
-    switch (_animationSpeed) {
-      case 'lent':
-        return 0.7;
-      case 'normal':
-        return 1.0;
-      case 'rapide':
-        return 1.5;
-      default:
-        return 1.0;
-    }
-  }
-  void _initializeAnimation() {
-    _controller.stop();
-    _rotation = 0.0;
-
-    switch (_animationStyle) {
-      case 'changer':
-        _startFadeAnimation();
-        break;
-      case 'rotation':
-        _startRotationAnimation();
-        break;
-      case 'flottant':
-        _startFloatingAnimation();
-        break;
-      case 'pulsation':
-        _startPulsingAnimation();
-        break;
-      default:
-        _startMovingAnimation();
-        break;
-    }
-  }
-
-  void _startAnimation(void Function() listener) {
-    _controller.dispose();
-    _controller =
-    AnimationController(vsync: this, duration: _getAnimationDuration())
-      ..addListener(listener);
-    _controller.repeat();
-  }
-
-  void _startMovingAnimation() => _startAnimation(_updateMovingPosition);
-  void _startRotationAnimation() => _startAnimation(_updateRotationPosition);
-  void _startFloatingAnimation() => _startAnimation(_updateFloatingPosition);
-
-  void _startPulsingAnimation() {
-    _controller.dispose();
-    _controller =
-        AnimationController(vsync: this, duration: const Duration(seconds: 2));
-    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.05).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
-    );
-    _controller.addListener(_updateMovingPosition);
-    _controller.repeat(reverse: true);
-  }
-
-  void _startFadeAnimation() {
-    _controller.dispose();
-    _controller = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 1500));
-    _fadeAnimation = Tween<double>(begin: 1.0, end: 0.0).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
-    );
-    _controller.addStatusListener((status) {
-      if (status == AnimationStatus.completed) {
-        if (!_isAnimating || !mounted) return;
-        _setRandomInitialPosition();
-        Future.delayed(const Duration(milliseconds: 500), () {
-          if (_isAnimating && mounted) _controller.reverse();
-        });
-      } else if (status == AnimationStatus.dismissed) {
-        if (!_isAnimating || !mounted) return;
-        Future.delayed(const Duration(milliseconds: 2000), () {
-          if (_isAnimating && mounted) _controller.forward();
-        });
-      }
-    });
-    _controller.forward();
-  }
-  void _handleCollisionEvent() {
-    widget.onSendToBack();
-    _collisionCount++;
-    if (_collisionCount >= 3) {
-      widget.onReplaceRequest();
-      _collisionCount = 0;
-    }
-  }
-
-  void _updateMovingPosition() {
-    if (!mounted) return;
-
-    final parentWidth = widget.parentConstraints.maxWidth;
-    final parentHeight = widget.parentConstraints.maxHeight;
-    final factor = _getVelocityFactor();
-
-    // Calcule la prochaine position potentielle
-    final double nextX = _positionX + (_velocityX * factor);
-    final double nextY = _positionY + (_velocityY * factor);
-
-    bool hasCollided = false;
-
-    // --- LOGIQUE DE COLLISION CORRIGÉE ---
-
-    // Vérifie les collisions sur l'axe horizontal (murs gauche et droit)
-    if (nextX <= 0 && _velocityX < 0) {
-      _velocityX = -_velocityX;
-      _positionX = 0; // Correction : On repositionne le widget pile sur le bord
-      hasCollided = true;
-    } else if (nextX + cardWidth >= parentWidth && _velocityX > 0) {
-      _velocityX = -_velocityX;
-      _positionX = parentWidth - cardWidth; // Correction : On repositionne sur le bord droit
-      hasCollided = true;
-    }
-
-    // Vérifie les collisions sur l'axe vertical (murs haut et bas)
-    if (nextY <= 0 && _velocityY < 0) {
-      _velocityY = -_velocityY;
-      _positionY = 0; // Correction : On repositionne sur le bord haut
-      hasCollided = true;
-    } else if (nextY + cardHeight >= parentHeight && _velocityY > 0) {
-      _velocityY = -_velocityY;
-      _positionY = parentHeight - cardHeight; // Correction : On repositionne sur le bord bas
-      hasCollided = true;
-    }
-
-    // Si aucune collision n'a été détectée, on met à jour la position normalement.
-    // Sinon, la position a déjà été corrigée et on déclenche l'événement.
-    if (!hasCollided) {
-      _positionX = nextX;
-      _positionY = nextY;
-    } else {
-      _handleCollisionEvent();
-      // Ajoute une petite variation aléatoire à la vitesse pour éviter les boucles
-      _velocityX *= (0.95 + random.nextDouble() * 0.1);
-      _velocityY *= (0.95 + random.nextDouble() * 0.1);
-    }
-
-    // S'assure que la vitesse ne devient pas trop grande ou trop petite
-    _velocityX = _velocityX.clamp(-maxSpeed, maxSpeed);
-    _velocityY = _velocityY.clamp(-maxSpeed, maxSpeed);
-    if (_velocityX.abs() < 0.5) _velocityX = 0.5 * _velocityX.sign;
-    if (_velocityY.abs() < 0.5) _velocityY = 0.5 * _velocityY.sign;
-
-    // Demande à Flutter de redessiner le widget à sa nouvelle position
-    if (mounted) {
-      setState(() {});
-    }
-  }
-
-  void _updateRotationPosition() {
-    _rotation += 0.02 * _getVelocityFactor();
-    _updateMovingPosition();
-  }
-
-  void _updateFloatingPosition() {
-    if (!mounted) return;
-
-    final baseFactor = _getVelocityFactor() * 0.5;
-    final time = _controller.value * 2 * pi;
-
-    final driftX = sin(time * _randomFrequencyX + _randomOffsetX) * _randomAmplitudeX;
-    final driftY = cos(time * _randomFrequencyY + _randomOffsetY) * _randomAmplitudeY;
-
-    _positionX += _velocityX.sign * driftX * baseFactor;
-    _positionY += _velocityY.sign * driftY * baseFactor;
-
-    _handleCollisionsAfterMove();
-
-    setState(() {});
-  }
-
-  void _handleCollisionsAfterMove() {
-    final shapePath = _getCardShape(widget.design).getOuterPath(Rect.fromLTWH(0, 0, cardWidth, cardHeight));
-    final localBounds = shapePath.getBounds();
-    final currentPath = shapePath.shift(Offset(_positionX, _positionY));
-    final currentBounds = currentPath.getBounds();
-    final parentWidth = widget.parentConstraints.maxWidth;
-    final parentHeight = widget.parentConstraints.maxHeight;
-    bool collided = false;
-
-    if (currentBounds.left <= 0) { _velocityX = _velocityX.abs(); _positionX = 0 - localBounds.left; collided = true; }
-    if (currentBounds.right >= parentWidth) { _velocityX = -_velocityX.abs(); _positionX = parentWidth - localBounds.right; collided = true; }
-    if (currentBounds.top <= 0) { _velocityY = _velocityY.abs(); _positionY = 0 - localBounds.top; collided = true; }
-    if (currentBounds.bottom >= parentHeight) { _velocityY = -_velocityY.abs(); _positionY = parentHeight - localBounds.bottom; collided = true; }
-
-    if (collided) {
-      _handleCollisionEvent();
-    }
-  }
-
-
-  String _getQualiteLabel(sm.SouvenirQualite qualite) {
-    switch (qualite) {
-      case sm.SouvenirQualite.nostalgie: return "Nostalgie";
-      case sm.SouvenirQualite.jamaisOublie: return "Jamais Oublié";
-      case sm.SouvenirQualite.bonheur: return "Bonheur";
-    }
-  }
-
-  Color _getQualiteColor(sm.SouvenirQualite qualite) {
-    switch (qualite) {
-      case sm.SouvenirQualite.nostalgie: return Colors.purple;
-      case sm.SouvenirQualite.jamaisOublie: return Colors.blue;
-      case sm.SouvenirQualite.bonheur: return Colors.green;
-    }
-  }
-  ShapeBorder _getCardShape(String design) {
-    switch (design) {
-      case 'rond':
-        return const RoundShapeBorder();
-      case 'coeur':
-        return const HeartShapeBorder();
-      case 'etoile':
-        return const StarShapeBorder();
-      case 'minimaliste':
-        return const SouvenirMinimalistShapeBorder();
-      case 'default':
-      default:
-        return const SouvenirMinimalistShapeBorder();
-    }
-  }
-  Future<Color> _loadCardColor() async {
-    final prefs = await SharedPreferences.getInstance();
-    final colorKey = prefs.getString('cardColor') ?? 'default';
-    switch (colorKey) {
-      case 'noir': return Colors.black;
-      case 'bleu': return Colors.blue.shade300;
-      case 'rouge': return Colors.red.shade300;
-      case 'vert': return Colors.green.shade300;
-      default: return Colors.blue.shade100;
-    }
-  }
-
-// --- AMÉLIORATION : Restauration du popup au long-press ---
-  void _showPopupCard(BuildContext context) {
-    showGeneralDialog(
-      context: context,
-      barrierDismissible: true, // Le popup peut être fermé en touchant en dehors
-      barrierLabel:
-      MaterialLocalizations.of(context).modalBarrierDismissLabel,
-      barrierColor: Colors.black54, // Fond sombre semi-transparent
-      transitionDuration: const Duration(milliseconds: 300), // Durée de l'animation d'apparition
-      pageBuilder: (context, animation, secondaryAnimation) {
-        // Le contenu du dialogue
-        return Center(
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5), // Effet de flou en arrière-plan
-            child: ScaleTransition( // Animation d'échelle pour l'apparition du popup
-              scale: CurvedAnimation(
-                parent: animation,
-                curve: Curves.easeOutBack,
-              ),
-              child: SizedBox(
-                width: MediaQuery.of(context).size.width * 0.9, // Largeur du popup
-                height: MediaQuery.of(context).size.height * 0.6, // Hauteur du popup
-                child: Card( // Utilisation de Card pour l'élévation et les coins arrondis
-                  elevation: 10,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(20),
-                      gradient: LinearGradient( // Dégradé pour le fond du popup
-                        colors: [
-                          Colors.blue.shade100,
-                          Colors.white,
-                        ],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.blue.withOpacity(0.2),
-                          spreadRadius: 3,
-                          blurRadius: 10,
-                          offset: const Offset(0, 5),
-                        ),
-                      ],
-                    ),
-                    padding: const EdgeInsets.all(25),
-                    child: SingleChildScrollView( // Permet de faire défiler le contenu si trop long
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Affichage des informations spécifiques au souvenir
-                          if (widget.souvenir.isRepost)
-                            Text(
-                              'Republié de ${widget.souvenir.repostedFromUserName ?? 'un ami'}',
-                              style: const TextStyle(
-                                  fontSize: 14, color: Colors.grey),
-                            ),
-                          Text(
-                            widget.souvenir.texte,
-                            style: const TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.blue,
-                            ),
-                          ),
-                          if (widget.souvenir.photoUrls.isNotEmpty) ...[
-                            const SizedBox(height: 16),
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(12),
-                              child: Image.network(
-                                widget.souvenir.photoUrls.first,
-                                height: 150,
-                                width: double.infinity,
-                                fit: BoxFit.cover,
-                              ),
-                            )
-                          ],
-                          const SizedBox(height: 16),
-                          Text(
-                            DateFormat('yyyy-MM-dd')
-                                .format(widget.souvenir.date),
-                            style: const TextStyle(
-                                fontSize: 15, color: Colors.grey),
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Icon(Icons.star,
-                                  color: _getQualiteColor( // Affiche la couleur de qualité
-                                      widget.souvenir.qualite),
-                                  size: 20),
-                              const SizedBox(width: 8),
-                              Text(
-                                'Qualité: ${_getQualiteLabel(widget.souvenir.qualite)}', // Affiche le label de qualité
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  color: _getQualiteColor(
-                                      widget.souvenir.qualite),
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Note: ${widget.souvenir.noteQualite}/100', // Affiche la note de qualité
-                            style: const TextStyle(
-                                fontSize: 16, color: Colors.black87),
-                          ),
-                          const SizedBox(height: 16),
-                          Row(
-                            children: [
-                              Icon(
-                                widget.souvenir.estPublic
-                                    ? Icons.public
-                                    : Icons.lock,
-                                color: widget.souvenir.estPublic
-                                    ? Colors.green
-                                    : Colors.red,
-                                size: 20,
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                widget.souvenir.estPublic
-                                    ? 'Visibilité: Public'
-                                    : 'Visibilité: Privé',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  color: widget.souvenir.estPublic
-                                      ? Colors.green
-                                      : Colors.red,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
+  Widget _buildThemesView(bool isDark) {
+    if (_availableCategories.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.account_tree_outlined,
+              size: 56,
+              color: Colors.grey[400],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Aucun thème biographique',
+              style: TextStyle(
+                color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
               ),
             ),
-          ),
-        );
-      },
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    super.build(context);
-    final bool isSpecialShape = widget.design == 'coeur' || widget.design == 'etoile' || widget.design == 'rond';
-
-    return FutureBuilder<Color>(
-      future: _loadCardColor(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) return const SizedBox.shrink();
-        final cardColor = snapshot.data!;
-
-        return Positioned(
-            left: _positionX,
-            top: _positionY,
-            child: AnimatedBuilder(
-              animation: _controller,
-              builder: (context, child) {
-                double currentScale = 1.0;
-                double currentOpacity = 1.0;
-
-                if (_animationStyle == 'changer') {
-                  currentOpacity = _fadeAnimation.value;
-                } else if (_animationStyle == 'pulsation' && _controller.isAnimating) {
-                  currentScale = _pulseAnimation.value;
-                }
-
-                return Opacity(
-                  opacity: currentOpacity,
-                  child: Transform.rotate(
-                    angle: _rotation,
-                    child: Transform.scale(
-                      scale: currentScale,
-                      child: child,
-                    ),
-                  ),
-                );
-              },
-              // --- CORRECTION : SizedBox est maintenant un carré ---
-              child: GestureDetector(
-                onLongPress: () => _showPopupCard(context),
-                child: SizedBox(
-                  width: cardWidth, // Utilise cardWidth (qui est égal à cardHeight)
-                  height: cardHeight, // Utilise cardHeight (qui est égal à cardWidth)
-                  child: Container(
-                    decoration: BoxDecoration(
-                      // La bordure verte est appliquée au conteneur carré
-                      border: Border.all(color: Colors.green, width: 2.0),
-                    ),
-                    child: Card(
-                      margin: EdgeInsets.zero,
-                      elevation: 8,
-                      clipBehavior: Clip.antiAlias,
-                      shape: _getCardShape(widget.design),
-                      child: Container(
-                        padding: widget.design == 'minimaliste' ? const EdgeInsets.all(10.0) : const EdgeInsets.all(16.0),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [cardColor, Colors.white],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                        ),
-                        child: _buildRectangularContent(
-                          isMinimaliste: widget.design == 'minimaliste',
-                          titleFontSize: widget.design == 'minimaliste' ? 13 : 16,
-                          titleMaxLines: widget.design == 'minimaliste' ? 2 : null,
-                          isSpecialShape: isSpecialShape,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
+            const SizedBox(height: 8),
+            Text(
+              "Écris des journées pour que l'IA crée\nautomatiquement ton arborescence.",
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+                fontSize: 13,
               ),
-            )
-        );
-      },
-    );
-  }
-
-// --- AMÉLIORATION : Contenu conditionnel pour les formes spéciales
-  Widget _buildRectangularContent({
-    required bool isMinimaliste,
-    double? titleFontSize,
-    int? titleMaxLines,
-    bool isSpecialShape = false,
-  }) {
-    final finalTitleFontSize = titleFontSize ?? 16;
-
-    if (isSpecialShape) {
-      // Pour les formes spéciales (cœur, étoile, rond), le 'padding' est déjà
-      // géré par le conteneur parent. On retire le 'Padding' redondant ici
-      // pour que le texte occupe l'espace disponible à l'intérieur de la forme.
-      return Center(
-        child: Text(
-          widget.souvenir.texte,
-          textAlign: TextAlign.center,
-          style: TextStyle(
-              fontSize: finalTitleFontSize,
-              height: 1.4,
-              color: Colors.black87,
-              fontWeight: FontWeight.w500),
-          overflow: TextOverflow.ellipsis,
-          maxLines: 5,
+            ),
+          ],
         ),
       );
     }
+    final titleColor = isDark ? Colors.blue.shade300 : Colors.blue;
+    final subtitleColor = isDark ? Colors.grey.shade400 : Colors.grey.shade600;
+    final cardColor = isDark ? Colors.grey[800] : Colors.white;
 
-    // Le reste de la logique pour les cartes "standard" et "minimaliste" reste inchangé.
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Contenu du haut
-        if (widget.souvenir.isRepost)
-          Text(
-            'De ${widget.souvenir.repostedFromUserName ?? 'un ami'}',
-            style: TextStyle(fontSize: isMinimaliste ? 10 : 11, color: Colors.grey),
-            overflow: TextOverflow.ellipsis,
+    return ListView.builder(
+      itemCount: _availableCategories.length,
+      itemBuilder: (context, i) {
+        final theme = _availableCategories[i];
+        final themeId = theme['id'] as String;
+        final themeNom = theme['nom'] as String;
+        final sousThemes = _sousThemesParTheme[themeId] ?? [];
+        final hasUpdates = _themeHasUpdates[themeId] ?? false;
+
+        return Card(
+          margin: const EdgeInsets.only(bottom: 10),
+          color: cardColor,
+          elevation: 2,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
           ),
-        Text(
-          widget.souvenir.texte,
-          style: TextStyle(
-              fontSize: finalTitleFontSize,
-              height: 1.4,
-              color: Colors.black87,
-              fontWeight: FontWeight.w500),
-          maxLines: titleMaxLines,
-          overflow: TextOverflow.ellipsis,
-        ),
-        if (widget.souvenir.photoUrls.isNotEmpty) ...[
-          SizedBox(height: isMinimaliste ? 4 : 8),
-          SizedBox(
-            height: isMinimaliste ? 30 : 60,
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              itemCount: widget.souvenir.photoUrls.length,
-              itemBuilder: (context, index) => Padding(
-                padding: EdgeInsets.only(right: isMinimaliste ? 4.0 : 6.0),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(isMinimaliste ? 4.0 : 8.0),
-                  child: Image.network(
-                    widget.souvenir.photoUrls[index],
-                    width: isMinimaliste ? 30 : 60,
-                    height: isMinimaliste ? 30 : 60,
-                    fit: BoxFit.cover,
-                  ),
+          child: ExpansionTile(
+            leading: CircleAvatar(
+              backgroundColor: Colors.blue.withOpacity(0.15),
+              radius: 18,
+              child: Text(
+                themeNom.isNotEmpty ? themeNom[0].toUpperCase() : '?',
+                style: TextStyle(
+                  color: titleColor,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
                 ),
               ),
             ),
-          ),
-        ],
-        // Contenu du bas
-        const SizedBox(height: 8),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Text(
-              DateFormat('yyyy-MM-dd').format(widget.souvenir.date),
-              style: TextStyle(
-                  color: Colors.grey,
-                  fontStyle: FontStyle.italic,
-                  fontSize: isMinimaliste ? 10 : 12),
-            ),
-            if (isMinimaliste)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                decoration: BoxDecoration(
-                  color: _getQualiteColor(widget.souvenir.qualite).withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text(
-                  _getQualiteLabel(widget.souvenir.qualite),
-                  style: TextStyle(
-                      color: _getQualiteColor(widget.souvenir.qualite),
-                      fontSize: 9,
-                      fontWeight: FontWeight.bold),
-                ),
-              )
-            else
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.stars_outlined,
-                      size: 14,
-                      color: _getQualiteColor(widget.souvenir.qualite)),
-                  const SizedBox(width: 4),
-                  Text(
-                    _getQualiteLabel(widget.souvenir.qualite),
+            title: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    themeNom,
                     style: TextStyle(
-                        fontSize: 12,
-                        color: _getQualiteColor(widget.souvenir.qualite),
-                        fontWeight: FontWeight.bold),
+                      fontWeight: FontWeight.w600,
+                      color: titleColor,
+                      fontSize: 15,
+                    ),
+                  ),
+                ),
+                if (hasUpdates)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.green,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Text(
+                      'Nouveau',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            subtitle: Text(
+              '${sousThemes.length} sous-thème${sousThemes.length != 1 ? 's' : ''}',
+              style: TextStyle(color: subtitleColor, fontSize: 12),
+            ),
+            childrenPadding: const EdgeInsets.only(
+              left: 16,
+              right: 8,
+              bottom: 8,
+            ),
+            children:
+                sousThemes.isEmpty
+                    ? [
+                      Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: Text(
+                          'Aucun sous-thème',
+                          style: TextStyle(
+                            color: subtitleColor,
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      ),
+                    ]
+                    : sousThemes.map((st) {
+                      final stKey = '$themeId||${st['id']}';
+                      final stHasUpd = _sousThemeHasUpdates[stKey] ?? false;
+                      return ListTile(
+                        dense: true,
+                        leading: Icon(
+                          Icons.label_outline,
+                          size: 16,
+                          color: Colors.blue.shade300,
+                        ),
+                        title: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                st['nom'] as String,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color:
+                                      isDark
+                                          ? Colors.grey[300]
+                                          : Colors.grey[800],
+                                ),
+                              ),
+                            ),
+                            if (stHasUpd)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 5,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.green.shade400,
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: const Text(
+                                  'Nouveau',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                        ),
+                      );
+                    }).toList(),
+          ),
+        );
+      },
+    );
+  }
+
+  // ── Vue chapitres ─────────────────────────────────────────────────────────
+
+  Widget _buildChapterList(bool isDark) {
+    final chapterCount =
+        _chaptersData.keys.isNotEmpty
+            ? (_chaptersData.keys.reduce((a, b) => a > b ? a : b)) + 1
+            : 1;
+    return ListView.builder(
+      itemCount: chapterCount,
+      itemBuilder: (_, i) => _buildChapterCard(i + 1, isDark),
+    );
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // CARTE DE CHAPITRE
+  // ═════════════════════════════════════════════════════════════════════════
+
+  Widget _buildChapterCard(int num, bool isDark) {
+    final data = _chaptersData[num];
+    final chapterExists = data != null;
+    final content = data?['content'] as String? ?? '';
+    final isGenerating = _generatingChapter == num;
+    final isCompleting = _completingChapter == num;
+    final isRewriting = _rewritingChapter == num;
+    final isBusy = isGenerating || isCompleting || isRewriting;
+    final isEditMode = _editModes[num] == true;
+    final selectedText = _selectedTextByChapter[num];
+    final themesUsed = data?['themesUsed'] as List<dynamic>?;
+    final pendingDiff = _pendingDiffs[num];
+    final hasPending = pendingDiff != null;
+
+    final titleColor = isDark ? Colors.blue.shade300 : Colors.blue;
+    final textColor = isDark ? Colors.grey[300] : Colors.grey[800];
+    final italicColor = isDark ? Colors.grey[500] : Colors.grey[600];
+    final chipBg = isDark ? Colors.blue.shade900 : Colors.lightBlue.shade100;
+    final chipTc = isDark ? Colors.white70 : Colors.black87;
+
+    final cardColor =
+        _isFullScreen
+            ? Colors.transparent
+            : (isDark ? Colors.grey[800] : Colors.white);
+    final cardElevation = _isFullScreen ? 0.0 : 4.0;
+    final cardMargin =
+        _isFullScreen ? EdgeInsets.zero : const EdgeInsets.only(bottom: 20);
+    final paddingVal =
+        _isFullScreen
+            ? const EdgeInsets.symmetric(horizontal: 4, vertical: 8)
+            : const EdgeInsets.all(20.0);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Card(
+          margin: cardMargin,
+          elevation: cardElevation,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          color: cardColor,
+          child: Padding(
+            padding: paddingVal,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // ── Titre + actions ──
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Chapitre $num',
+                        style: TextStyle(
+                          fontSize: _isFullScreen ? 24 : 20,
+                          fontWeight: FontWeight.bold,
+                          color: titleColor,
+                        ),
+                      ),
+                    ),
+                    if (chapterExists) ...[
+                      IconButton(
+                        icon: Icon(
+                          isEditMode ? Icons.check_circle : Icons.edit,
+                          color: isEditMode ? Colors.green : titleColor,
+                          size: 22,
+                        ),
+                        tooltip:
+                            isEditMode ? 'Sauvegarder' : 'Éditer manuellement',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        onPressed: () async {
+                          if (isEditMode) {
+                            final newText =
+                                _editControllers[num]?.text ?? content;
+                            try {
+                              await _db
+                                  .collection('users')
+                                  .doc(_user!.uid)
+                                  .collection('chapters')
+                                  .doc('chapter_$num')
+                                  .update({'content': newText});
+                              if (mounted) {
+                                setState(() {
+                                  _chaptersData[num] = {
+                                    ..._chaptersData[num]!,
+                                    'content': newText,
+                                  };
+                                  _editModes[num] = false;
+                                  _editControllers[num]?.dispose();
+                                  _editControllers.remove(num);
+                                  _editImages.remove(num);
+                                });
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Chapitre $num sauvegardé !'),
+                                    backgroundColor: Colors.green,
+                                  ),
+                                );
+                              }
+                            } catch (e) {
+                              if (mounted)
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Erreur : $e'),
+                                    backgroundColor: Colors.red,
+                                  ),
+                                );
+                            }
+                          } else {
+                            _editControllers[num] = TextEditingController(
+                              text: content,
+                            );
+                            setState(() => _editModes[num] = true);
+                          }
+                        },
+                      ),
+                      if (isEditMode)
+                        IconButton(
+                          icon: const Icon(
+                            Icons.cancel,
+                            color: Colors.red,
+                            size: 22,
+                          ),
+                          tooltip: 'Annuler',
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          onPressed: () {
+                            _editControllers[num]?.dispose();
+                            _editControllers.remove(num);
+                            setState(() {
+                              _editModes[num] = false;
+                              _editImages.remove(num);
+                            });
+                          },
+                        ),
+                      if (!isEditMode)
+                        IconButton(
+                          icon: Icon(
+                            Icons.visibility,
+                            color: titleColor,
+                            size: 26,
+                          ),
+                          tooltip: 'Lire le chapitre',
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          onPressed: () => _showFullScreen(num, isDark),
+                        ),
+                    ],
+                  ],
+                ),
+
+                const SizedBox(height: 12),
+
+                // ── Chips thèmes ──
+                if (themesUsed != null && themesUsed.isNotEmpty) ...[
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    children:
+                        themesUsed.contains('all')
+                            ? [
+                              Chip(
+                                label: Text(
+                                  'Tous les thèmes',
+                                  style: TextStyle(color: chipTc),
+                                ),
+                                backgroundColor: chipBg,
+                              ),
+                            ]
+                            : themesUsed
+                                .map(
+                                  (id) => Chip(
+                                    label: Text(
+                                      _categoryNames[id as String] ?? id,
+                                      style: TextStyle(color: chipTc),
+                                    ),
+                                    backgroundColor: chipBg,
+                                  ),
+                                )
+                                .toList(),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+
+                // ══════════════════════════════════════════════════════════════════
+                // ZONE PRINCIPALE : loading / edit / diff / lecture
+                // ══════════════════════════════════════════════════════════════════
+                if (isBusy)
+                  Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(32.0),
+                      child: Column(
+                        children: [
+                          const CircularProgressIndicator(
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              Colors.blue,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            isGenerating
+                                ? 'Génération en cours…'
+                                : isCompleting
+                                ? 'Complétion en cours…'
+                                : 'Réécriture en cours…',
+                            style: TextStyle(
+                              color: isDark ? Colors.white70 : Colors.black54,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                else if (isEditMode)
+                  _buildEditModeWidget(num, isDark, textColor)
+                else if (hasPending)
+                  _buildDiffWidget(num, pendingDiff!, isDark, textColor)
+                else if (chapterExists)
+                  _buildReadWidget(num, content, isDark, textColor)
+                else
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 20),
+                    child: Center(
+                      child: Text(
+                        "Ce chapitre n'a pas encore été généré.",
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: italicColor,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ),
+                  ),
+
+                // ── Bandeau sélection ──
+                if (selectedText != null &&
+                    !isEditMode &&
+                    chapterExists &&
+                    !hasPending) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.withOpacity(0.14),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.amber.withOpacity(0.5)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.text_fields,
+                          color: Colors.amber,
+                          size: 18,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Sélection : "${selectedText.length > 60 ? '${selectedText.substring(0, 60)}…' : selectedText}"',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color:
+                                  isDark
+                                      ? Colors.amber.shade200
+                                      : Colors.amber.shade800,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          icon: Icon(
+                            Icons.close,
+                            size: 16,
+                            color:
+                                isDark
+                                    ? Colors.amber.shade200
+                                    : Colors.amber.shade700,
+                          ),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          onPressed:
+                              () => setState(
+                                () => _selectedTextByChapter.remove(num),
+                              ),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
-              ),
-          ],
-        ),
-        if (!isMinimaliste) ...[
-          const SizedBox(height: 4),
-          Align(
-            alignment: Alignment.centerRight,
-            child: Text(
-              'Note: ${widget.souvenir.noteQualite}/100',
-              style: const TextStyle(fontSize: 12, color: Colors.black87),
+
+                const SizedBox(height: 16),
+
+                // ── Bouton principal ──
+                if (!hasPending)
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      Tooltip(
+                        message:
+                            !_canUpdate && _lastAutobioUpdate != null
+                                ? 'Disponible dans ${_kNonVipAutobiographyCooldownDays - DateTime.now().difference(_lastAutobioUpdate!).inDays} jour(s)'
+                                : '',
+                        child: ElevatedButton.icon(
+                          icon: Icon(
+                            chapterExists
+                                ? Icons.edit_note
+                                : Icons.auto_fix_high,
+                          ),
+                          label: Text(chapterExists ? 'Thèmes' : 'Générer'),
+                          onPressed:
+                              (isBusy || !_canUpdate)
+                                  ? null
+                                  : () => _openThemeDialog(
+                                    num,
+                                    selectedText: selectedText,
+                                  ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.blue.shade700,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(25),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 20,
+                              vertical: 12,
+                            ),
+                            elevation: 5,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+              ],
             ),
           ),
-        ]
+        ),
+        if (_isFullScreen)
+          Divider(
+            height: 32,
+            color: isDark ? Colors.grey[800] : Colors.grey[300],
+          ),
       ],
     );
   }
 
+  // ═════════════════════════════════════════════════════════════════════════
+  // WIDGET : MODE LECTURE (texte sélectionnable)
+  // ═════════════════════════════════════════════════════════════════════════
 
-  @override
-  void dispose() {
-    _isAnimating = false;
-    _controller.dispose();
-    super.dispose();
+  Widget _buildReadWidget(
+    int num,
+    String content,
+    bool isDark,
+    Color? textColor,
+  ) {
+    // On cherche toutes les balises [IMAGE:url]
+    final RegExp imgRegExp = RegExp(r'\[IMAGE:(.*?)\]');
+    final matches = imgRegExp.allMatches(content);
+
+    // S'il n'y a pas d'image, on affiche le texte normalement
+    if (matches.isEmpty) {
+      return SelectableText(
+        content,
+        style: TextStyle(height: 1.6, fontSize: 15, color: textColor),
+        onSelectionChanged: (sel, _) {
+          if (sel.start == -1 || sel.end == -1) return;
+          final s = content.substring(
+            sel.start.clamp(0, content.length),
+            sel.end.clamp(0, content.length),
+          );
+          setState(() {
+            if (s.isNotEmpty)
+              _selectedTextByChapter[num] = s;
+            else
+              _selectedTextByChapter.remove(num);
+          });
+        },
+      );
+    }
+
+    // S'il y a des images, on construit une colonne avec du texte, puis l'image, puis du texte...
+    List<Widget> children = [];
+    int lastIndex = 0;
+
+    for (final match in matches) {
+      // 1. Le texte AVANT l'image
+      final textBefore = content.substring(lastIndex, match.start).trim();
+      if (textBefore.isNotEmpty) {
+        children.add(
+          SelectableText(
+            textBefore,
+            style: TextStyle(height: 1.6, fontSize: 15, color: textColor),
+            onSelectionChanged: (sel, _) {
+              if (sel.start == -1 || sel.end == -1) return;
+              final s = textBefore.substring(
+                sel.start.clamp(0, textBefore.length),
+                sel.end.clamp(0, textBefore.length),
+              );
+              setState(() {
+                if (s.isNotEmpty)
+                  _selectedTextByChapter[num] = s;
+                else
+                  _selectedTextByChapter.remove(num);
+              });
+            },
+          ),
+        );
+        children.add(const SizedBox(height: 16));
+      }
+
+      // 2. L'image en elle-même
+      final url = match.group(1);
+      if (url != null && url.isNotEmpty) {
+        children.add(
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: Image.network(
+              url,
+              width: double.infinity,
+              fit: BoxFit.cover,
+              errorBuilder:
+                  (_, __, ___) => Container(
+                    width: double.infinity,
+                    height: 150,
+                    color: Colors.grey.shade300,
+                    child: const Icon(Icons.broken_image, color: Colors.grey),
+                  ),
+            ),
+          ),
+        );
+        children.add(const SizedBox(height: 16));
+      }
+      lastIndex = match.end;
+    }
+
+    // 3. Le texte restant APRÈS la dernière image
+    final textAfter = content.substring(lastIndex).trim();
+    if (textAfter.isNotEmpty) {
+      children.add(
+        SelectableText(
+          textAfter,
+          style: TextStyle(height: 1.6, fontSize: 15, color: textColor),
+          onSelectionChanged: (sel, _) {
+            if (sel.start == -1 || sel.end == -1) return;
+            final s = textAfter.substring(
+              sel.start.clamp(0, textAfter.length),
+              sel.end.clamp(0, textAfter.length),
+            );
+            setState(() {
+              if (s.isNotEmpty)
+                _selectedTextByChapter[num] = s;
+              else
+                _selectedTextByChapter.remove(num);
+            });
+          },
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: children,
+    );
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // WIDGET : MODE ÉDITION MANUELLE (avec galerie d'images)
+  // ═════════════════════════════════════════════════════════════════════════
+
+  Widget _buildEditModeWidget(int num, bool isDark, Color? textColor) {
+    final images = _editImages[num] ?? [];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextField(
+          controller: _editControllers[num],
+          maxLines: null,
+          keyboardType: TextInputType.multiline,
+          style: TextStyle(fontSize: 15, height: 1.6, color: textColor),
+          decoration: InputDecoration(
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            hintText: 'Éditez votre chapitre…',
+          ),
+        ),
+        const SizedBox(height: 12),
+        // Galerie d'images insérées
+        if (images.isNotEmpty) ...[
+          Text(
+            'Images insérées :',
+            style: TextStyle(
+              fontWeight: FontWeight.w600,
+              color: isDark ? Colors.blue.shade300 : Colors.blue,
+              fontSize: 13,
+            ),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 90,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: images.length,
+              itemBuilder: (_, i) {
+                return Stack(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: Image.network(
+                          images[i],
+                          width: 90,
+                          height: 90,
+                          fit: BoxFit.cover,
+                          errorBuilder:
+                              (_, __, ___) => Container(
+                                width: 90,
+                                height: 90,
+                                color: Colors.grey[300],
+                                child: const Icon(Icons.broken_image),
+                              ),
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      top: 0,
+                      right: 8,
+                      child: GestureDetector(
+                        onTap:
+                            () => setState(
+                              () => (_editImages[num] ??= []).removeAt(i),
+                            ),
+                        child: Container(
+                          decoration: const BoxDecoration(
+                            color: Colors.red,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.close,
+                            size: 16,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
+        OutlinedButton.icon(
+          icon: const Icon(Icons.add_photo_alternate),
+          label: const Text('Ajouter une image'),
+          onPressed: () => _pickAndUploadImage(num),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: isDark ? Colors.blue.shade300 : Colors.blue,
+            side: BorderSide(
+              color: isDark ? Colors.blue.shade300 : Colors.blue,
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+          ),
+        ),
+        if (images.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text(
+            '💡 Les images sont sauvegardées. Pour les intégrer dans le texte, copiez leur URL et insérez-la manuellement dans le texte si besoin.',
+            style: TextStyle(
+              fontSize: 11,
+              color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // WIDGET : AFFICHAGE DU DIFF (rouge = supprimé, jaune = ajouté)
+  // + boutons Accepter / Refuser
+  // ═════════════════════════════════════════════════════════════════════════
+
+  Widget _buildDiffWidget(
+    int num,
+    _ChapterDiff diff,
+    bool isDark,
+    Color? textColor,
+  ) {
+    final isComplete = diff.insertedText.isNotEmpty; // mode complétion
+    final isRewrite = diff.replacedText.isNotEmpty; // mode réécriture
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // ── Titre du diff ──
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: (isDark ? Colors.blue.shade900 : Colors.blue.shade50)
+                .withOpacity(0.5),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: Colors.blue.shade300.withOpacity(0.5)),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.preview, color: Colors.blue.shade400, size: 18),
+              const SizedBox(width: 8),
+              Text(
+                isComplete
+                    ? 'Aperçu de la complétion'
+                    : 'Aperçu de la réécriture',
+                style: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: Colors.blue,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        // ── Légende ──
+        Row(
+          children: [
+            _legendChip(
+              'Supprimé',
+              const Color(0xFFFF4444),
+              const Color(0x22FF4444),
+            ),
+            const SizedBox(width: 8),
+            _legendChip(
+              'Ajouté',
+              const Color(0xFFE6A817),
+              const Color(0x22E6A817),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+
+        // ── Contenu avec diff ──
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: isDark ? Colors.grey.shade900 : Colors.grey.shade50,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isDark ? Colors.grey.shade700 : Colors.grey.shade200,
+            ),
+          ),
+          child: _buildDiffRichText(
+            diff,
+            isComplete,
+            isRewrite,
+            isDark,
+            textColor,
+          ),
+        ),
+
+        const SizedBox(height: 16),
+
+        // ── Boutons Accepter / Refuser ──
+        Row(
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.check_circle_outline),
+                label: const Text('Accepter'),
+                onPressed: () => _acceptDiff(num),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green.shade600,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.cancel_outlined),
+                label: const Text('Refuser'),
+                onPressed: () => _rejectDiff(num),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.red,
+                  side: const BorderSide(color: Colors.red),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _legendChip(String label, Color fg, Color bg) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: fg.withOpacity(0.4)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(color: fg, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              color: fg,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDiffRichText(
+    _ChapterDiff diff,
+    bool isComplete,
+    bool isRewrite,
+    bool isDark,
+    Color? textColor,
+  ) {
+    final spans = <InlineSpan>[];
+    final baseStyle = TextStyle(height: 1.65, fontSize: 15, color: textColor);
+
+    if (isComplete) {
+      // ── Mode complétion : Couper le texte original à l'endroit exact de l'ancrage ──
+      final int offset = diff.insertOffset ?? diff.originalContent.length;
+
+      // Sécuriser l'offset pour éviter un crash si l'index est hors limites
+      final safeOffset = offset.clamp(0, diff.originalContent.length);
+
+      final before = diff.originalContent.substring(0, safeOffset);
+      final after = diff.originalContent.substring(safeOffset);
+
+      // 1. Afficher le texte AVANT l'insertion
+      if (before.isNotEmpty) {
+        spans.add(TextSpan(text: before, style: baseStyle));
+      }
+
+      // 2. Afficher le NOUVEAU texte en JAUNE
+      if (diff.insertedText.isNotEmpty) {
+        // Ajouter un saut de ligne propre seulement s'il y a du texte avant
+        if (before.isNotEmpty && !before.endsWith('\n'))
+          spans.add(TextSpan(text: '\n\n', style: baseStyle));
+
+        spans.add(
+          TextSpan(
+            text: diff.insertedText,
+            style: baseStyle.copyWith(
+              backgroundColor: const Color(0x55E6A817),
+              color: isDark ? Colors.amber.shade100 : Colors.brown.shade800,
+            ),
+          ),
+        );
+
+        // Ajouter un saut de ligne propre s'il y a du texte après
+        if (after.isNotEmpty && !after.startsWith('\n'))
+          spans.add(TextSpan(text: '\n\n', style: baseStyle));
+      }
+
+      // 3. Afficher le texte APRÈS l'insertion
+      if (after.isNotEmpty) {
+        spans.add(TextSpan(text: after, style: baseStyle));
+      }
+    } else if (isRewrite) {
+      // ── Mode réécriture : rechercher le passage supprimé et afficher rouge+jaune ──
+      final original = diff.originalContent;
+      final removedText = diff.replacedText;
+      final replacedWith = diff.replacementText;
+      final idx = original.indexOf(removedText);
+
+      if (idx != -1) {
+        if (idx > 0)
+          spans.add(
+            TextSpan(text: original.substring(0, idx), style: baseStyle),
+          );
+        spans.add(
+          TextSpan(
+            text: removedText,
+            style: baseStyle.copyWith(
+              backgroundColor: const Color(0x33FF4444),
+              color: const Color(0xFFFF4444),
+              decoration: TextDecoration.lineThrough,
+              decorationColor: const Color(0xFFFF4444),
+            ),
+          ),
+        );
+        spans.add(TextSpan(text: '\n', style: baseStyle));
+        spans.add(
+          TextSpan(
+            text: replacedWith,
+            style: baseStyle.copyWith(
+              backgroundColor: const Color(0x55E6A817),
+              color: isDark ? Colors.amber.shade100 : Colors.brown.shade800,
+            ),
+          ),
+        );
+        final afterStart = idx + removedText.length;
+        if (afterStart < original.length)
+          spans.add(
+            TextSpan(text: original.substring(afterStart), style: baseStyle),
+          );
+      } else {
+        spans.add(
+          TextSpan(
+            text: diff.newContent,
+            style: baseStyle.copyWith(backgroundColor: const Color(0x55E6A817)),
+          ),
+        );
+      }
+    } else {
+      spans.add(TextSpan(text: diff.newContent, style: baseStyle));
+    }
+
+    return RichText(text: TextSpan(children: spans));
+  }
+
+  // ── Plein écran ───────────────────────────────────────────────────────────
+
+  // ── Plein écran ───────────────────────────────────────────────────────────
+
+  void _showFullScreen(int initialChapterNum, bool isDark) {
+    final chapters = _chaptersData.keys.toList()..sort();
+    final initialIndex = chapters.indexOf(initialChapterNum);
+    if (initialIndex == -1) return;
+
+    // 👇 MODIFICATION ICI : On utilise Navigator.push au lieu de showDialog
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder:
+            (ctx) => _ChapterReaderScreen(
+              initialIndex: initialIndex,
+              chapters: chapters,
+              chaptersData: _chaptersData,
+              isDark: isDark,
+              buildReadWidget: _buildReadWidget,
+            ),
+      ),
+    );
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// SECTION 6 – MODE LECTURE IMMERSIVE (AVEC SWIPE)
+// ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
+// SECTION 6 – MODE LECTURE IMMERSIVE (AVEC SWIPE HORIZONTAL)
+// ═══════════════════════════════════════════════════════════════════════════
 
-class MovingJourneeCard extends StatefulWidget {
-  final JourneeModel journee;
+class _ChapterReaderScreen extends StatefulWidget {
+  final int initialIndex;
+  final List<int> chapters;
+  final Map<int, Map<String, dynamic>> chaptersData;
+  final bool isDark;
+  final Widget Function(int, String, bool, Color?) buildReadWidget;
+
+  const _ChapterReaderScreen({
+    Key? key,
+    required this.initialIndex,
+    required this.chapters,
+    required this.chaptersData,
+    required this.isDark,
+    required this.buildReadWidget,
+  }) : super(key: key);
+
+  @override
+  State<_ChapterReaderScreen> createState() => _ChapterReaderScreenState();
+}
+
+class _ChapterReaderScreenState extends State<_ChapterReaderScreen> {
+  late PageController _pageController;
+
+  @override
+  void initState() {
+    super.initState();
+    _pageController = PageController(initialPage: widget.initialIndex);
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // 👇 Utilisation d'un Scaffold pour un vrai mode plein écran
+    return Scaffold(
+      backgroundColor: widget.isDark ? Colors.grey[900] : Colors.white,
+      body: SafeArea(
+        child: Stack(
+          children: [
+            PageView.builder(
+              controller: _pageController,
+              itemCount: widget.chapters.length,
+              // 👇 MODIFICATION ICI : On passe en horizontal pour ne plus bloquer le scroll du texte
+              scrollDirection: Axis.horizontal,
+              itemBuilder: (context, index) {
+                final num = widget.chapters[index];
+                final content =
+                    widget.chaptersData[num]?['content'] as String? ?? '';
+                final textColor =
+                    widget.isDark ? Colors.grey[300] : Colors.grey[800];
+
+                return Column(
+                  children: [
+                    const SizedBox(height: 24),
+                    Text(
+                      'Chapitre $num',
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: widget.isDark ? Colors.white : Colors.black87,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.only(
+                          left: 28,
+                          right: 28,
+                          bottom: 76,
+                        ),
+                        child: widget.buildReadWidget(
+                          num,
+                          content,
+                          widget.isDark,
+                          textColor,
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+            Positioned(
+              top: 8,
+              right: 8,
+              child: IconButton(
+                icon: const Icon(Icons.close, size: 28),
+                color: widget.isDark ? Colors.white54 : Colors.black54,
+                onPressed: () => Navigator.pop(context),
+              ),
+            ),
+            if (widget.chapters.length > 1)
+              Positioned(
+                bottom: 12,
+                left: 0,
+                right: 0,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.keyboard_arrow_left_rounded,
+                      size: 18,
+                      color: widget.isDark ? Colors.white30 : Colors.black26,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Glissez pour changer de chapitre',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: widget.isDark ? Colors.white30 : Colors.black26,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Icon(
+                      Icons.keyboard_arrow_right_rounded,
+                      size: 18,
+                      color: widget.isDark ? Colors.white30 : Colors.black26,
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SECTION 5 – CLASSE DE DONNÉES INTERNE
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _FetchResult {
+  final List<Map<String, dynamic>> elements;
+  final List<DocumentReference> refs;
+  const _FetchResult(this.elements, this.refs);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SECTION 2 – DIALOG DE SÉLECTION DE THÈME (refonte complète)
+// ═══════════════════════════════════════════════════════════════════════════
+
+class MovingContentCard extends StatefulWidget {
+  final dynamic data;
   final String design;
+  final String color;
+  final String animationType;
   final String size;
   final VoidCallback onSendToBack;
   final VoidCallback onReplaceRequest;
   final BoxConstraints parentConstraints;
+  final Function(BuildContext context, dynamic data) contentBuilder;
+  final VoidCallback onLongPress;
+  final VoidCallback? onTap;
 
-  const MovingJourneeCard({
+  const MovingContentCard({
     super.key,
-    required this.journee,
+    required this.data,
     required this.design,
+    required this.color,
+    required this.animationType,
     required this.size,
     required this.onSendToBack,
     required this.onReplaceRequest,
     required this.parentConstraints,
+    required this.contentBuilder,
+    required this.onLongPress,
+    this.onTap,
   });
 
   @override
-  _MovingJourneeCardState createState() => _MovingJourneeCardState();
+  _MovingContentCardState createState() => _MovingContentCardState();
 }
 
-class _MovingJourneeCardState extends State<MovingJourneeCard>
+class _MovingContentCardState extends State<MovingContentCard>
     with TickerProviderStateMixin, AutomaticKeepAliveClientMixin {
-  late AnimationController _controller;
-  late Animation<double> _fadeAnimation;
-  late Animation<double> _pulseAnimation;
-  double _positionX = 0.0;
-  double _positionY = 0.0;
-  double _velocityX = 0.0;
-  double _velocityY = 0.0;
-  double _rotation = 0.0;
-  bool _isAnimating = true;
+  // --- Contrôleurs d'animation ---
+  late AnimationController _moveController;
+  late AnimationController _effectController;
+  late Animation<double> _effectAnimation;
+
+  // --- État du mouvement ---
+  double _positionX = 0.0, _positionY = 0.0;
+  double _velocityX = 0.0, _velocityY = 0.0;
+
+  // --- Dimensions (calculées) ---
+  Size _parentSize = Size.zero;
+  Size _cardActualSize = Size.zero;
+  late double _cardWidth; // Largeur de base définie par le widget
+  final GlobalKey _cardKey = GlobalKey();
+
+  // --- État de l'animation ---
   int _collisionCount = 0;
-
-  double _randomOffsetX = 0.0;
-  double _randomOffsetY = 0.0;
-  double _randomFrequencyX = 1.0;
-  double _randomFrequencyY = 1.0;
-  double _randomAmplitudeX = 1.0;
-  double _randomAmplitudeY = 1.0;
-
-  static const double maxSpeed = 3.0;
-  final Random random = Random();
-
-  String _animationStyle = 'default';
+  final Random _random = Random();
   String _animationSpeed = 'normal';
+  bool _isStaticMode = false;
+
+  // Pour l'animation "flottant"
+  double _floatOffsetX = 0.0;
+  double _floatOffsetY = 0.0;
+
+  // Pour l'animation "changer"
+  Timer? _fadeTimer;
+  bool _isFading = false;
 
   @override
   bool get wantKeepAlive => true;
@@ -1836,197 +3535,280 @@ class _MovingJourneeCardState extends State<MovingJourneeCard>
   @override
   void initState() {
     super.initState();
-    _initializeState();
+    _setBaseCardSize();
+
+    // Initialisation des contrôleurs
+    _moveController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 50),
+    );
+    _effectController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    );
+    _effectAnimation = Tween<double>(
+      begin: 0,
+      end: 0,
+    ).animate(_effectController);
+
+    // Le calcul des dimensions et le démarrage des animations se feront après le premier rendu
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _updateDimensionsAndInitialize();
+      }
+    });
   }
 
-  // --- CORRECTION : Taille unifiée pour la carte (carré) ---
-  double get cardSize {
-    // Taille de base unifiée pour souvenirs et journées
-    double baseSize = 250.0;
-    switch (widget.size) {
-      case 'tres_petit':
-        return baseSize * 0.7;
-      case 'petit':
-        return baseSize * 0.85;
-      case 'normal':
-        return baseSize;
-      case 'gros':
-        return baseSize * 1.1;
-      default:
-        return baseSize;
+  @override
+  void didUpdateWidget(covariant MovingContentCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.animationType != oldWidget.animationType) {
+      // Si le type d'animation change, on réinitialise tout
+      _initializeAnimations();
     }
   }
 
-  // Les getters pour la largeur et la hauteur utilisent maintenant la même taille
-  double get cardWidth => cardSize;
-  double get cardHeight => cardSize;
+  // =========================================================================
+  // --- 1. GESTION DES DIMENSIONS ET DE L'INITIALISATION ---
+  // =========================================================================
 
+  /// Méthode principale qui calcule les dimensions et lance les animations.
+  void _updateDimensionsAndInitialize() async {
+    if (!mounted) return;
 
-  void _initializeState() {
-    _controller = AnimationController(vsync: this);
-    _initializeRandomFloatingParams();
+    // A. Calculer les dimensions de la zone parente et de la carte elle-même
+    _parentSize = widget.parentConstraints.biggest;
+    final RenderBox? renderBox =
+        _cardKey.currentContext?.findRenderObject() as RenderBox?;
+    if (renderBox != null && renderBox.hasSize) {
+      _cardActualSize = renderBox.size;
+    }
+    // Fallback : si la mesure n'est pas prête, on utilise _cardWidth (carré)
+    if (_cardActualSize == Size.zero) {
+      _cardActualSize = Size(_cardWidth, _cardWidth);
+    }
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        _setRandomInitialPosition();
-        _loadAnimationSettings();
-      }
-    });
+    // B. Définir une position de départ aléatoire une fois les dimensions connues
+    _setRandomInitialPosition();
 
-    _velocityX = (random.nextDouble() - 0.5) * maxSpeed;
-    _velocityY = (random.nextDouble() - 0.5) * maxSpeed;
+    // C. Charger les préférences de vitesse et initialiser le type d'animation
+    await _loadAnimationSettings();
+    _initializeAnimations();
+
+    // D. Démarrer la boucle de déplacement
+    _moveController.addListener(_tick);
   }
 
-  void _initializeRandomFloatingParams() {
-    _randomOffsetX = random.nextDouble() * 2 * pi;
-    _randomOffsetY = random.nextDouble() * 2 * pi;
-    _randomFrequencyX = random.nextDouble() * 0.4 + 0.8;
-    _randomFrequencyY = random.nextDouble() * 0.4 + 0.8;
-    _randomAmplitudeX = random.nextDouble() * 0.5 + 0.5;
-    _randomAmplitudeY = random.nextDouble() * 0.5 + 0.5;
+  /// Définit la largeur de base de la carte en fonction de la prop `size`.
+  void _setBaseCardSize() {
+    const double baseSize = 250.0;
+    switch (widget.size) {
+      case 'tres_petit':
+        _cardWidth = baseSize * 0.7;
+        break;
+      case 'petit':
+        _cardWidth = baseSize * 0.85;
+        break;
+      case 'gros':
+        _cardWidth = baseSize * 1.1;
+        break;
+      default:
+        _cardWidth = baseSize;
+    }
   }
 
+  /// Charge la vitesse d'animation depuis SharedPreferences.
   Future<void> _loadAnimationSettings() async {
     try {
       SharedPreferences prefs = await SharedPreferences.getInstance();
       if (!mounted) return;
-      setState(() {
-        _animationStyle =
-            prefs.getString('journeeAnimation') ?? 'default';
-        _animationSpeed = prefs.getString('animationSpeed') ?? 'normal';
-      });
-      _initializeAnimation();
+      _animationSpeed = prefs.getString('animationSpeed') ?? 'normal';
     } catch (e) {
-      print('Erreur de chargement du style d\'animation : $e');
-      _animationStyle = 'default';
-      _initializeAnimation();
+      print('Erreur de chargement des paramètres d\'animation : $e');
+    }
+  }
+
+  /// Configure et démarre les contrôleurs en fonction du type d'animation.
+  void _initializeAnimations() {
+    _moveController.duration = _getSpeedDuration();
+    _effectController.stop();
+    _fadeTimer?.cancel();
+    _isStaticMode = false;
+
+    // Réinitialise les listeners pour éviter les doublons
+    _effectController.removeListener(_updateFloatOffset);
+
+    switch (widget.animationType) {
+      case 'rotation':
+        _effectController.duration = _getEffectDuration();
+        _effectAnimation = Tween<double>(
+          begin: 0,
+          end: 2 * math.pi,
+        ).animate(_effectController);
+        _effectController.repeat(reverse: true);
+        break;
+      case 'pulsation':
+        _effectController.duration = _getEffectDuration();
+        _effectAnimation = Tween<double>(begin: 0.85, end: 1.15).animate(
+          CurvedAnimation(parent: _effectController, curve: Curves.easeInOut),
+        );
+        _effectController.repeat(reverse: true);
+        break;
+      case 'flottant':
+        _effectController.duration = _getEffectDuration();
+        _effectAnimation = Tween<double>(begin: 0, end: 2 * math.pi).animate(
+          CurvedAnimation(parent: _effectController, curve: Curves.linear),
+        );
+        _effectController.addListener(_updateFloatOffset);
+        _effectController.repeat();
+        break;
+      case 'changer':
+        _isStaticMode = true;
+        _effectAnimation = Tween<double>(
+          begin: 1.0,
+          end: 1.0,
+        ).animate(_effectController);
+        _scheduleRandomFade();
+        break;
+      case 'rebondissant':
+      default:
+        _effectAnimation = Tween<double>(
+          begin: 0,
+          end: 0,
+        ).animate(_effectController);
+    }
+
+    // Démarrer le mouvement si l'animation n'est pas statique
+    if (!_isStaticMode) {
+      if (!_moveController.isAnimating) {
+        _moveController.repeat();
+      }
+    } else {
+      _moveController.stop();
+    }
+  }
+
+  // =========================================================================
+  // --- 2. BOUCLE D'ANIMATION PRINCIPALE ET LOGIQUE DE DÉPLACEMENT ---
+  // =========================================================================
+
+  /// Cette méthode est appelée à chaque frame par le `_moveController`.
+  void _tick() {
+    if (!mounted || _isStaticMode || _parentSize == Size.zero) return;
+
+    // A. Calculer la prochaine position potentielle
+    final double nextX = _positionX + _velocityX;
+    final double nextY = _positionY + _velocityY;
+
+    // B. Vérifier et corriger cette position en fonction des collisions
+    final Map<String, double> result = _handleBoundaryCollisions(nextX, nextY);
+
+    // C. Mettre à jour l'état de la carte avec les nouvelles valeurs
+    setState(() {
+      _positionX = result['x']!;
+      _positionY = result['y']!;
+      _velocityX = result['vx']!;
+      _velocityY = result['vy']!;
+    });
+  }
+
+  // =========================================================================
+  // --- 3. GESTION DES COLLISIONS AVEC LES BORDS ---
+  // =========================================================================
+
+  /// Vérifie si la carte dépasse les limites et retourne la position et la vélocité corrigées.
+  Map<String, double> _handleBoundaryCollisions(
+    double proposedX,
+    double proposedY,
+  ) {
+    double correctedX = proposedX;
+    double correctedY = proposedY;
+    double newVx = _velocityX;
+    double newVy = _velocityY;
+    bool hasCollided = false;
+
+    // Obtenir la taille et le décalage effectifs pour le calcul de collision
+    final cardWidth = _getEffectiveWidth();
+    final cardHeight = _getEffectiveHeight();
+    final isFloating = widget.animationType == 'flottant';
+    final currentFloatOffsetX = isFloating ? _floatOffsetX : 0.0;
+    final currentFloatOffsetY = isFloating ? _floatOffsetY : 0.0;
+
+    // Si la hauteur de la carte n'a pas encore été calculée, on ne fait rien pour éviter les erreurs.
+    if (cardHeight <= 0) {
+      return {'x': correctedX, 'y': correctedY, 'vx': newVx, 'vy': newVy};
+    }
+
+    // Calculer les bords effectifs de la carte à sa position proposée
+    final effectiveLeft = proposedX + currentFloatOffsetX;
+    final effectiveRight = effectiveLeft + cardWidth;
+    final effectiveTop = proposedY + currentFloatOffsetY;
+    final effectiveBottom = effectiveTop + cardHeight;
+
+    // Vérifier les collisions horizontales
+    if (effectiveLeft < 0) {
+      correctedX = -currentFloatOffsetX;
+      newVx = _velocityX.abs();
+      hasCollided = true;
+    } else if (effectiveRight > _parentSize.width) {
+      correctedX = _parentSize.width - cardWidth - currentFloatOffsetX;
+      newVx = -_velocityX.abs();
+      hasCollided = true;
+    }
+
+    // Vérifier les collisions verticales
+    if (effectiveTop < 0) {
+      correctedY = -currentFloatOffsetY;
+      newVy = _velocityY.abs();
+      hasCollided = true;
+    } else if (effectiveBottom > _parentSize.height) {
+      correctedY = _parentSize.height - cardHeight - currentFloatOffsetY;
+      newVy = -_velocityY.abs();
+      hasCollided = true;
+    }
+
+    if (hasCollided) {
+      _handleCollisionEvent();
+    }
+
+    return {'x': correctedX, 'y': correctedY, 'vx': newVx, 'vy': newVy};
+  }
+
+  // =========================================================================
+  // --- MÉTHODES UTILITAIRES ET GESTIONNAIRES D'ÉVÉNEMENTS ---
+  // =========================================================================
+
+  void _updateFloatOffset() {
+    if (mounted) {
+      setState(() {
+        _floatOffsetX = math.sin(_effectAnimation.value) * 15;
+        _floatOffsetY = math.cos(_effectAnimation.value * 2) * 10;
+      });
     }
   }
 
   void _setRandomInitialPosition() {
-    final parentWidth = widget.parentConstraints.maxWidth;
-    final parentHeight = widget.parentConstraints.maxHeight;
+    if (_parentSize == Size.zero) return;
+    // Utiliser les dimensions effectives (avec fallback _cardWidth)
+    final double cardW =
+        _cardActualSize.width > 0 ? _cardActualSize.width : _cardWidth;
+    final double cardH =
+        _cardActualSize.height > 0 ? _cardActualSize.height : _cardWidth;
 
-    if (parentWidth > cardWidth && parentHeight > cardHeight) {
-      final shapePath = _getCardShape(widget.design).getOuterPath(
-          Rect.fromLTWH(0, 0, cardWidth, cardHeight));
-      final bounds = shapePath.getBounds();
+    final double margin = widget.animationType == 'flottant' ? 20 : 5;
+    final double availableWidth = _parentSize.width - cardW - (2 * margin);
+    final double availableHeight = _parentSize.height - cardH - (2 * margin);
 
-      final double minX = 0 - bounds.left;
-      final double maxX = parentWidth - bounds.right;
-      final double minY = 0 - bounds.top;
-      final double maxY = parentHeight - bounds.bottom;
-
-      if (maxX > minX && maxY > minY) {
-        setState(() {
-          _positionX = minX + random.nextDouble() * (maxX - minX);
-          _positionY = minY + random.nextDouble() * (maxY - minY);
-        });
-      } else {
-        setState(() {
-          _positionX = (parentWidth - cardWidth) / 2;
-          _positionY = (parentHeight - cardHeight) / 2;
-        });
-      }
+    if (availableWidth > 0 && availableHeight > 0) {
+      _positionX = margin + _random.nextDouble() * availableWidth;
+      _positionY = margin + _random.nextDouble() * availableHeight;
     }
-  }
 
-  Duration _getAnimationDuration() {
-    switch (_animationSpeed) {
-      case 'lent':
-        return const Duration(milliseconds: 80);
-      case 'normal':
-        return const Duration(milliseconds: 50);
-      case 'rapide':
-        return const Duration(milliseconds: 30);
-      default:
-        return const Duration(milliseconds: 50);
-    }
-  }
-
-  double _getVelocityFactor() {
-    switch (_animationSpeed) {
-      case 'lent':
-        return 0.7;
-      case 'normal':
-        return 1.0;
-      case 'rapide':
-        return 1.5;
-      default:
-        return 1.0;
-    }
-  }
-
-  void _initializeAnimation() {
-    _controller.stop();
-    _rotation = 0.0;
-
-    switch (_animationStyle) {
-      case 'changer':
-        _startFadeAnimation();
-        break;
-      case 'rotation':
-        _startRotationAnimation();
-        break;
-      case 'flottant':
-        _startFloatingAnimation();
-        break;
-      case 'pulsation':
-        _startPulsingAnimation();
-        break;
-      default:
-        _startMovingAnimation();
-        break;
-    }
-  }
-
-  void _startAnimation(void Function() listener) {
-    _controller.dispose();
-    _controller =
-    AnimationController(vsync: this, duration: _getAnimationDuration())
-      ..addListener(listener);
-    _controller.repeat();
-  }
-
-  void _startMovingAnimation() => _startAnimation(_updateMovingPosition);
-
-  void _startRotationAnimation() => _startAnimation(_updateRotationPosition);
-
-  void _startFloatingAnimation() => _startAnimation(_updateFloatingPosition);
-
-  void _startPulsingAnimation() {
-    _controller.dispose();
-    _controller =
-        AnimationController(vsync: this, duration: const Duration(seconds: 2));
-    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.05).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
-    );
-    _controller.addListener(_updateMovingPosition);
-    _controller.repeat(reverse: true);
-  }
-
-  void _startFadeAnimation() {
-    _controller.dispose();
-    _controller = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 1500));
-    _fadeAnimation = Tween<double>(begin: 1.0, end: 0.0).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
-    );
-    _controller.addStatusListener((status) {
-      if (status == AnimationStatus.completed) {
-        if (!_isAnimating || !mounted) return;
-        _setRandomInitialPosition();
-        Future.delayed(const Duration(milliseconds: 500), () {
-          if (_isAnimating && mounted) _controller.reverse();
-        });
-      } else if (status == AnimationStatus.dismissed) {
-        if (!_isAnimating || !mounted) return;
-        Future.delayed(const Duration(milliseconds: 2000), () {
-          if (_isAnimating && mounted) _controller.forward();
-        });
-      }
-    });
-    _controller.forward();
+    // Donner une vélocité initiale aléatoire
+    _velocityX = (_random.nextDouble() - 0.5) * 3.5;
+    _velocityY = (_random.nextDouble() - 0.5) * 3.5;
+    if (_velocityX.abs() < 1.0) _velocityX = _velocityX.sign * 1.0;
+    if (_velocityY.abs() < 1.0) _velocityY = _velocityY.sign * 1.0;
   }
 
   void _handleCollisionEvent() {
@@ -2038,835 +3820,207 @@ class _MovingJourneeCardState extends State<MovingJourneeCard>
     }
   }
 
-  void _updateMovingPosition() {
-    if (!mounted) return;
-
-    final parentWidth = widget.parentConstraints.maxWidth;
-    final parentHeight = widget.parentConstraints.maxHeight;
-    final factor = _getVelocityFactor();
-
-    // Calcule la prochaine position potentielle
-    final double nextX = _positionX + (_velocityX * factor);
-    final double nextY = _positionY + (_velocityY * factor);
-
-    bool hasCollided = false;
-
-    // --- LOGIQUE DE COLLISION CORRIGÉE ---
-
-    // Vérifie les collisions sur l'axe horizontal (murs gauche et droit)
-    if (nextX <= 0 && _velocityX < 0) {
-      _velocityX = -_velocityX;
-      _positionX = 0; // Correction : On repositionne le widget pile sur le bord
-      hasCollided = true;
-    } else if (nextX + cardWidth >= parentWidth && _velocityX > 0) {
-      _velocityX = -_velocityX;
-      _positionX = parentWidth - cardWidth; // Correction : On repositionne sur le bord droit
-      hasCollided = true;
-    }
-
-    // Vérifie les collisions sur l'axe vertical (murs haut et bas)
-    if (nextY <= 0 && _velocityY < 0) {
-      _velocityY = -_velocityY;
-      _positionY = 0; // Correction : On repositionne sur le bord haut
-      hasCollided = true;
-    } else if (nextY + cardHeight >= parentHeight && _velocityY > 0) {
-      _velocityY = -_velocityY;
-      _positionY = parentHeight - cardHeight; // Correction : On repositionne sur le bord bas
-      hasCollided = true;
-    }
-
-    // Si aucune collision n'a été détectée, on met à jour la position normalement.
-    // Sinon, la position a déjà été corrigée et on déclenche l'événement.
-    if (!hasCollided) {
-      _positionX = nextX;
-      _positionY = nextY;
-    } else {
-      _handleCollisionEvent();
-      // Ajoute une petite variation aléatoire à la vitesse pour éviter les boucles
-      _velocityX *= (0.95 + random.nextDouble() * 0.1);
-      _velocityY *= (0.95 + random.nextDouble() * 0.1);
-    }
-
-    // S'assure que la vitesse ne devient pas trop grande ou trop petite
-    _velocityX = _velocityX.clamp(-maxSpeed, maxSpeed);
-    _velocityY = _velocityY.clamp(-maxSpeed, maxSpeed);
-    if (_velocityX.abs() < 0.5) _velocityX = 0.5 * _velocityX.sign;
-    if (_velocityY.abs() < 0.5) _velocityY = 0.5 * _velocityY.sign;
-
-    // Demande à Flutter de redessiner le widget à sa nouvelle position
-    if (mounted) {
-      setState(() {});
-    }
-  }
-
-  void _updateRotationPosition() {
-    _rotation += 0.02 * _getVelocityFactor();
-    _updateMovingPosition();
-  }
-
-  void _updateFloatingPosition() {
-    if (!mounted) return;
-
-    final baseFactor = _getVelocityFactor() * 0.5;
-    final time = _controller.value * 2 * pi;
-
-    final driftX = sin(time * _randomFrequencyX + _randomOffsetX) *
-        _randomAmplitudeX;
-    final driftY = cos(time * _randomFrequencyY + _randomOffsetY) *
-        _randomAmplitudeY;
-
-    _positionX += _velocityX.sign * driftX * baseFactor;
-    _positionY += _velocityY.sign * driftY * baseFactor;
-
-    _handleCollisionsAfterMove();
-
-    setState(() {});
-  }
-
-  void _handleCollisionsAfterMove() {
-    final shapePath = _getCardShape(widget.design).getOuterPath(
-        Rect.fromLTWH(0, 0, cardWidth, cardHeight));
-    final localBounds = shapePath.getBounds();
-    final currentPath = shapePath.shift(Offset(_positionX, _positionY));
-    final currentBounds = currentPath.getBounds();
-    final parentWidth = widget.parentConstraints.maxWidth;
-    final parentHeight = widget.parentConstraints.maxHeight;
-    bool collided = false;
-
-    if (currentBounds.left <= 0) {
-      _velocityX = _velocityX.abs();
-      _positionX = 0 - localBounds.left;
-      collided = true;
-    }
-    if (currentBounds.right >= parentWidth) {
-      _velocityX = -_velocityX.abs();
-      _positionX = parentWidth - localBounds.right;
-      collided = true;
-    }
-    if (currentBounds.top <= 0) {
-      _velocityY = _velocityY.abs();
-      _positionY = 0 - localBounds.top;
-      collided = true;
-    }
-    if (currentBounds.bottom >= parentHeight) {
-      _velocityY = -_velocityY.abs();
-      _positionY = parentHeight - localBounds.bottom;
-      collided = true;
-    }
-
-    if (collided) {
-      _handleCollisionEvent();
-    }
-  }
-
-  Future<Color> _loadCardColor() async {
-    final prefs = await SharedPreferences.getInstance();
-    final colorKey = prefs.getString('journeeCardColor') ?? 'default';
-    switch (colorKey) {
-      case 'noir':
-        return Colors.black;
-      case 'bleu':
-        return Colors.blue.shade300;
-      case 'rouge':
-        return Colors.red.shade300;
-      case 'vert':
-        return Colors.green.shade300;
+  // Fonctions pour obtenir les durées et tailles effectives
+  Duration _getSpeedDuration() {
+    switch (_animationSpeed) {
+      case 'lent':
+        return const Duration(milliseconds: 80);
+      case 'rapide':
+        return const Duration(milliseconds: 30);
       default:
-        return Colors.blue.shade100;
+        return const Duration(milliseconds: 50);
     }
   }
 
-  ShapeBorder _getCardShape(String design) {
-    switch (design) {
-      case 'rond':
-        return const RoundShapeBorder();
-      case 'coeur':
-        return const HeartShapeBorder();
-      case 'etoile':
-        return const StarShapeBorder();
-      case 'minimaliste':
-        return const JourneeMinimalistShapeBorder();
-      case 'default':
+  Duration _getEffectDuration() {
+    switch (_animationSpeed) {
+      case 'lent':
+        return const Duration(milliseconds: 3000);
+      case 'rapide':
+        return const Duration(milliseconds: 1000);
       default:
-        return const JourneeMinimalistShapeBorder();
+        return const Duration(milliseconds: 2000);
     }
   }
 
-// --- AMÉLIORATION : Restauration du popup au long-press ---
-  void _showPopupCard(BuildContext context) {
-    showGeneralDialog(
-      context: context,
-      barrierDismissible: true,
-      // Le popup peut être fermé en touchant en dehors
-      barrierLabel: MaterialLocalizations
-          .of(context)
-          .modalBarrierDismissLabel,
-      barrierColor: Colors.black54,
-      // Fond sombre semi-transparent
-      transitionDuration: const Duration(milliseconds: 300),
-      // Durée de l'animation d'apparition
-      pageBuilder: (context, animation, secondaryAnimation) {
-        // Le contenu du dialogue
-        return Center(
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
-            // Effet de flou en arrière-plan
-            child: ScaleTransition( // Animation d'échelle pour l'apparition du popup
-              scale: CurvedAnimation(
-                  parent: animation, curve: Curves.easeOutBack),
-              child: Container(
-                width: MediaQuery
-                    .of(context)
-                    .size
-                    .width * 0.9, // Largeur du popup
-                height: MediaQuery
-                    .of(context)
-                    .size
-                    .height * 0.7, // Hauteur du popup
-                margin: const EdgeInsets.all(16),
-                child: Material( // Utilisation de Material pour l'élévation et les coins arrondis
-                  elevation: 10,
-                  borderRadius: BorderRadius.circular(20),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(20),
-                      gradient: LinearGradient( // Dégradé pour le fond du popup
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [Colors.blue.shade100, Colors.white],
-                      ),
-                    ),
-                    child: Column(
-                      children: [
-                        Expanded(
-                          child: SingleChildScrollView( // Permet de faire défiler le contenu si trop long
-                            padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-                            child: StatefulBuilder( // Permet de mettre à jour l'état à l'intérieur du dialogue
-                              builder: (BuildContext context,
-                                  StateSetter setDialogState) {
-                                bool isSearching = false;
-                                String? searchError;
-                                List<MapEntry<JourneeModel,
-                                    double>>? displayedSimilarities;
-                                DateTime? lastSearchDate;
-                                bool hasResultsInCache = false;
+  double _getEffectiveWidth() {
+    final baseWidth =
+        _cardActualSize.width > 0 ? _cardActualSize.width : _cardWidth;
+    if (widget.animationType == 'pulsation' && _effectController.isAnimating) {
+      return baseWidth * _effectAnimation.value;
+    }
+    return baseWidth;
+  }
 
-                                // Charge les résultats de similarité en cache (s'ils existent)
-                                Future<void> loadCache() async {
-                                  if (widget.journee.id == null) return;
-                                  final doc = await FirebaseFirestore.instance
-                                      .collection('journees')
-                                      .doc(widget.journee.id)
-                                      .get();
-                                  if (!doc.exists) return;
+  double _getEffectiveHeight() {
+    final baseHeight =
+        _cardActualSize.height > 0 ? _cardActualSize.height : _cardWidth;
+    if (widget.animationType == 'pulsation' && _effectController.isAnimating) {
+      return baseHeight * _effectAnimation.value;
+    }
+    return baseHeight;
+  }
 
-                                  final data = doc.data();
-                                  final cache = data?['similarJourneesCache'] as Map<
-                                      String,
-                                      dynamic>?;
-                                  final lastSearchTimestamp = data?['lastSimilaritySearchDate'] as Timestamp?;
+  // --- Logique pour l'animation 'changer' (non modifiée) ---
+  void _scheduleRandomFade() {
+    if (widget.animationType != 'changer') return;
+    _fadeTimer?.cancel();
+    final delaySeconds = 5 + _random.nextInt(10);
+    _fadeTimer = Timer(Duration(seconds: delaySeconds), _startFadeAnimation);
+  }
 
-                                  if (lastSearchTimestamp != null) {
-                                    lastSearchDate =
-                                        lastSearchTimestamp.toDate();
-                                  }
-
-                                  if (cache != null && cache.isNotEmpty) {
-                                    hasResultsInCache = true;
-                                    // Reconstitue les objets JourneeModel à partir des IDs en cache
-                                    final futures = cache.entries.map((
-                                        entry) async {
-                                      final journeeDoc = await FirebaseFirestore
-                                          .instance
-                                          .collection('journees')
-                                          .doc(entry.key)
-                                          .get();
-                                      if (journeeDoc.exists) {
-                                        return MapEntry(
-                                          JourneeModel.fromFirestore(
-                                              journeeDoc),
-                                          (entry.value as num).toDouble(),
-                                        );
-                                      }
-                                      return null;
-                                    }).toList();
-
-                                    final results = (await Future.wait(futures))
-                                        .whereType<
-                                        MapEntry<JourneeModel, double>>()
-                                        .toList();
-                                    results.sort((a, b) => b.value.compareTo(
-                                        a.value)); // Trie par similarité
-                                    displayedSimilarities = results;
-                                  }
-                                }
-
-                                // Gère la recherche et la mise à jour des journées similaires
-                                Future<void> handleSearch() async {
-                                  setDialogState(() {
-                                    isSearching = true;
-                                    searchError = null;
-                                  });
-
-                                  try {
-                                    // Appelle la fonction de recherche de similarité
-                                    final results = await _findSimilarJournees(
-                                        widget.journee,
-                                        searchAfter: lastSearchDate);
-
-                                    // Sauvegarde les résultats et le timestamp de recherche dans Firestore
-                                    await FirebaseFirestore.instance.collection(
-                                        'journees').doc(widget.journee.id).set({
-                                      'similarJourneesCache': results.map((key,
-                                          value) => MapEntry(key.id!, value)),
-                                      'lastSimilaritySearchDate': FieldValue
-                                          .serverTimestamp(),
-                                    }, SetOptions(merge: true));
-
-                                    setDialogState(() {
-                                      displayedSimilarities =
-                                          results.entries.toList();
-                                      hasResultsInCache = results.isNotEmpty;
-                                      lastSearchDate = DateTime.now();
-                                    });
-                                  } catch (e) {
-                                    setDialogState(() {
-                                      searchError = "Erreur: ${e.toString()}";
-                                    });
-                                  } finally {
-                                    setDialogState(() {
-                                      isSearching = false;
-                                    });
-                                  }
-                                }
-
-                                // Construction de l'UI du contenu du dialogue
-                                return FutureBuilder(
-                                    future: loadCache(),
-                                    // Charge le cache au démarrage
-                                    builder: (context, snapshot) {
-                                      if (snapshot.connectionState ==
-                                          ConnectionState.waiting) {
-                                        return const Center(
-                                            child: CircularProgressIndicator());
-                                      }
-
-                                      return Column(
-                                        crossAxisAlignment: CrossAxisAlignment
-                                            .start,
-                                        children: [
-                                          // Informations sur la journée actuelle
-                                          Text(
-                                              DateFormat('EEEE d MMMM yyyy')
-                                                  .format(widget.journee.date),
-                                              style: const TextStyle(
-                                                  fontSize: 18,
-                                                  fontWeight: FontWeight.bold,
-                                                  color: Colors.blue)
-                                          ),
-                                          const SizedBox(height: 12),
-                                          Text(widget.journee.texte1 ??
-                                              'Aucune description',
-                                              style: const TextStyle(
-                                                  fontSize: 16,
-                                                  color: Colors.black87,
-                                                  height: 1.4)),
-                                          const SizedBox(height: 16),
-
-                                          const Divider(height: 32),
-
-                                          // Affichage des journées similaires ou des messages d'erreur/absence
-                                          if (searchError != null)
-                                            Center(child: Text(searchError!,
-                                                style: const TextStyle(
-                                                    color: Colors.red)))
-                                          else
-                                            if (displayedSimilarities != null &&
-                                                displayedSimilarities!
-                                                    .isNotEmpty)
-                                              Column(
-                                                crossAxisAlignment: CrossAxisAlignment
-                                                    .start,
-                                                children: [
-                                                  const Text(
-                                                      'Journées similaires',
-                                                      style: TextStyle(
-                                                          fontSize: 18,
-                                                          fontWeight: FontWeight
-                                                              .bold,
-                                                          color: Colors.blue)),
-                                                  const SizedBox(height: 8),
-                                                  ...displayedSimilarities!
-                                                      .map((entry) {
-                                                    // Carte pour chaque journée similaire trouvée
-                                                    return Card(
-                                                      margin: const EdgeInsets
-                                                          .symmetric(
-                                                          vertical: 4),
-                                                      child: ListTile(
-                                                        title: Text(DateFormat(
-                                                            'd MMMM yyyy')
-                                                            .format(
-                                                            entry.key.date)),
-                                                        subtitle: Text(
-                                                            entry.key.texte1 ??
-                                                                '', maxLines: 1,
-                                                            overflow: TextOverflow
-                                                                .ellipsis),
-                                                        trailing: Text(
-                                                            '${entry.value
-                                                                .toStringAsFixed(
-                                                                0)}%',
-                                                            style: const TextStyle(
-                                                                fontWeight: FontWeight
-                                                                    .bold)),
-                                                      ),
-                                                    );
-                                                  }).toList(),
-                                                ],
-                                              )
-                                            else
-                                              if (lastSearchDate != null &&
-                                                  !hasResultsInCache)
-                                                const Center(
-                                                  child: Padding(
-                                                    padding: EdgeInsets
-                                                        .symmetric(
-                                                        vertical: 16.0),
-                                                    child: Text(
-                                                      "Aucune journée similaire n'a été trouvée lors de la dernière analyse.",
-                                                      textAlign: TextAlign
-                                                          .center,
-                                                      style: TextStyle(
-                                                          fontStyle: FontStyle
-                                                              .italic,
-                                                          color: Colors.grey),
-                                                    ),
-                                                  ),
-                                                ),
-
-                                          const SizedBox(height: 20),
-
-                                          // Bouton de recherche/mise à jour
-                                          Center(
-                                            child: isSearching
-                                                ? const CircularProgressIndicator()
-                                                : ElevatedButton.icon(
-                                              icon: Icon(hasResultsInCache
-                                                  ? Icons.sync
-                                                  : Icons.search),
-                                              label: Text(hasResultsInCache
-                                                  ? 'Mettre à jour'
-                                                  : 'Rechercher des journées similaires'),
-                                              onPressed: handleSearch,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 20),
-                                        ],
-                                      );
-                                    }
-                                );
-                              },
-                            ),
-                          ),
-                        ),
-                        // Bouton de fermeture
-                        Padding(
-                          padding: const EdgeInsets.all(16.0),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.end,
-                            children: [
-                              TextButton(
-                                onPressed: () => Navigator.pop(context),
-                                child: const Text('Fermer'),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        );
-      },
+  void _startFadeAnimation() {
+    if (!mounted || _isFading || widget.animationType != 'changer') return;
+    _isFading = true;
+    _effectController.duration = const Duration(milliseconds: 800);
+    _effectAnimation = Tween<double>(begin: 1.0, end: 0.0).animate(
+      CurvedAnimation(parent: _effectController, curve: Curves.easeInOut),
     );
-  }
-
-  Future<Map<JourneeModel, double>> _findSimilarJournees(
-      JourneeModel selectedJournee, {DateTime? searchAfter}) async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return {};
-
-    final selectedText = selectedJournee.texte1 ??
-        selectedJournee.commentaire ?? '';
-    if (selectedText
-        .trim()
-        .isEmpty) return {}; // Pas de texte, pas de similarité
-
-    Query journeesQuery = FirebaseFirestore.instance
-        .collection('journees')
-        .where('userId', isEqualTo: user.uid)
-        .where(
-        'id', isNotEqualTo: selectedJournee.id); // Exclure la journée elle-même
-
-    if (searchAfter != null) {
-      journeesQuery = journeesQuery.where(
-          'date', isGreaterThan: Timestamp.fromDate(searchAfter));
-    }
-
-    final allJourneesSnapshot = await journeesQuery.get();
-    final similarJourneesFutures = <Future<MapEntry<JourneeModel, double>?>>[];
-
-    for (var doc in allJourneesSnapshot.docs) {
-      final journee = JourneeModel.fromFirestore(doc); // Crée un modèle Journee
-      final journeeText = journee.texte1 ?? journee.commentaire ?? '';
-      if (journeeText.isEmpty) continue; // Si le texte est vide, on l'ignore
-
-      // Calcule la similarité entre les deux textes en utilisant l'API DeepSeek
-      similarJourneesFutures.add(
-          _calculateSimilarity(selectedText, journeeText).then((similarity) {
-            if (similarity >
-                30) { // Seuil de 30% pour considérer comme similaire
-              return MapEntry(journee, similarity);
-            }
-            return null;
-          }));
-    }
-
-    final results = await Future.wait(similarJourneesFutures);
-    final similarJournees = <JourneeModel, double>{};
-    for (var result in results) {
-      if (result != null) {
-        similarJournees[result.key] = result.value;
+    _effectController.forward(from: 0).whenComplete(() {
+      if (mounted) {
+        _setRandomInitialPosition();
+        Future.delayed(const Duration(milliseconds: 100), () {
+          if (mounted && widget.animationType == 'changer') {
+            _effectAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+              CurvedAnimation(
+                parent: _effectController,
+                curve: Curves.easeInOut,
+              ),
+            );
+            _effectController.forward(from: 0).whenComplete(() {
+              _isFading = false;
+              _scheduleRandomFade();
+            });
+          }
+        });
       }
-    }
-
-    // Trie les journées similaires par ordre décroissant de similarité
-    final sortedEntries = similarJournees.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
-
-    return Map.fromEntries(
-        sortedEntries.take(5)); // Retourne les 5 journées les plus similaires
+    });
   }
 
-  /// Calcule un pourcentage de similarité entre deux chaînes de texte en utilisant l'API DeepSeek.
-  ///
-  /// @param text1 Le premier texte à comparer.
-  /// @param text2 Le deuxième texte à comparer.
-  /// @returns Un double représentant le pourcentage de similarité (0-100).
-  Future<double> _calculateSimilarity(String text1, String text2) async {
-    // ... (Logique d'appel à l'API DeepSeek pour le calcul de similarité,
-    //      incluant l'envoi des deux textes et la récupération du pourcentage) ...
-    //      Cette méthode est déjà présente dans le code que vous avez fourni
-    //      dans `HomePageState` et a été dupliquée pour la clarté et l'encapsulation ici.
-    //      Je ne la répète pas entièrement pour économiser de l'espace.
-    // ... (Code existant pour _calculateSimilarity) ...
-    if (DEEPSEEK_API_KEY == 'sk-2891f44dd4e344908dda525bf5852649') {
-      // Message d'erreur ou comportement par défaut si la clé API n'est pas configurée
-    }
-    const String url = 'https://api.deepseek.com/v1/chat/completions';
-
-    if (text1
-        .trim()
-        .isEmpty || text2
-        .trim()
-        .isEmpty) return 0.0;
-
-    try {
-      final response = await http.post(
-        Uri.parse(url),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $DEEPSEEK_API_KEY',
-        },
-        body: jsonEncode({
-          'model': 'deepseek-chat',
-          'messages': [
-            {
-              'role': 'user',
-              'content':
-              '''Compare les deux textes suivants et donne un pourcentage de similarité basé sur leur contenu, leur ton et leurs thèmes principaux. Réponds uniquement avec un nombre entier entre 0 et 100 suivi de "/100", par exemple "75/100".
-
-                  Texte 1: $text1
-                  Texte 2: $text2'''
-            }
-          ],
-          'max_tokens': 50,
-        }),
-      );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final content = data['choices']?[0]['message']['content']?.toString() ??
-            '';
-
-        if (content.isEmpty) {
-          print(
-              'Avertissement: Réponse vide de DeepSeek pour le calcul de similarité.');
-          return 0.0;
-        }
-
-        final match = RegExp(r'(\d+)\s*/\s*100').firstMatch(content);
-        if (match != null && match.group(1) != null) {
-          return double.parse(match.group(1)!);
-        }
-
-        final numberMatch = RegExp(r'\b(\d+)\b').firstMatch(content);
-        if (numberMatch != null && numberMatch.group(1) != null) {
-          return double.parse(numberMatch.group(1)!);
-        }
-
-        print(
-            'Avertissement: Format de réponse de similarité inattendu: "$content"');
-        return 0.0;
-      } else {
-        print('Erreur API DeepSeek pour similarité: ${response
-            .statusCode} - ${response.body}');
-        return 0.0;
-      }
-    } catch (e, stacktrace) {
-      print('Erreur lors du calcul de la similarité : $e\n$stacktrace');
-      return 0.0;
-    }
-  }
-
-
-
+  // --- Le reste des méthodes build, dispose, etc. ---
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final bool isSpecialShape = widget.design == 'coeur' || widget.design == 'etoile' || widget.design == 'rond';
 
-    return FutureBuilder<Color>(
-      future: _loadCardColor(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return const SizedBox.shrink();
+    return AnimatedBuilder(
+      animation: Listenable.merge([_moveController, _effectController]),
+      builder: (context, child) {
+        Widget transformedChild;
+        double finalLeft = _positionX;
+        double finalTop = _positionY;
+
+        switch (widget.animationType) {
+          case 'rotation':
+            transformedChild = Transform.rotate(
+              angle: _effectAnimation.value,
+              child: child,
+            );
+            break;
+          case 'pulsation':
+            transformedChild = Transform.scale(
+              scale: _effectAnimation.value,
+              alignment: Alignment.center,
+              child: child,
+            );
+            break;
+          case 'flottant':
+            // Le décalage est appliqué ici, sur la position de base calculée dans _tick()
+            finalLeft += _floatOffsetX;
+            finalTop += _floatOffsetY;
+            transformedChild = child!;
+            break;
+          case 'changer':
+            transformedChild = Opacity(
+              opacity: _effectAnimation.value,
+              child: child,
+            );
+            break;
+          default:
+            transformedChild = child!;
         }
-        final cardColor = snapshot.data!;
 
         return Positioned(
-            left: _positionX,
-            top: _positionY,
-            child: AnimatedBuilder(
-              animation: _controller,
-              builder: (context, child) {
-                double currentScale = 1.0;
-                double currentOpacity = 1.0;
-
-                if (_animationStyle == 'changer') {
-                  currentOpacity = _fadeAnimation.value;
-                } else if (_animationStyle == 'pulsation' && _controller.isAnimating) {
-                  currentScale = _pulseAnimation.value;
-                }
-
-                return Opacity(
-                  opacity: currentOpacity,
-                  child: Transform.rotate(
-                    angle: _rotation,
-                    child: Transform.scale(
-                      scale: currentScale,
-                      child: child,
-                    ),
+          left: finalLeft,
+          top: finalTop,
+          child: transformedChild,
+        );
+      },
+      child: GestureDetector(
+        onLongPress: widget.onLongPress,
+        onTap:
+            widget.onTap == null
+                ? null
+                : () async {
+                  _effectController.stop();
+                  _moveController.stop();
+                  widget.onTap!();
+                  // Restart animations after dialog is dismissed
+                  if (mounted) _initializeAnimations();
+                },
+        child: Stack(
+          key: _cardKey,
+          alignment: Alignment.center,
+          children: [
+            Image.asset(
+              _getImagePath(widget.design, widget.color),
+              width: _cardWidth,
+              // ================== CORRECTION APPLIQUÉE ICI ==================
+              // On force la hauteur pour garantir une taille carrée et prévisible.
+              // Cela assure que _cardActualSize.height sera correct.
+              height: _cardWidth,
+              // =============================================================
+              fit: BoxFit.contain,
+              errorBuilder: (context, error, stackTrace) {
+                return Container(
+                  width: _cardWidth,
+                  height: _cardWidth, // Assumer carré pour le fallback
+                  color: Colors.grey.shade200,
+                  child: Icon(
+                    Icons.broken_image,
+                    color: Colors.grey.shade400,
+                    size: 40,
                   ),
                 );
               },
-              // --- CORRECTION : SizedBox est maintenant un carré ---
-              child: GestureDetector(
-                onLongPress: () => _showPopupCard(context),
-                child: SizedBox(
-                  width: cardWidth, // Utilise cardWidth (qui est égal à cardHeight)
-                  height: cardHeight, // Utilise cardHeight (qui est égal à cardWidth)
-                  child: Container(
-                    decoration: BoxDecoration(
-                      // La bordure verte est appliquée au conteneur carré
-                      border: Border.all(color: Colors.green, width: 2.0),
-                    ),
-                    child: Card(
-                      margin: EdgeInsets.zero,
-                      elevation: 8,
-                      clipBehavior: Clip.antiAlias,
-                      shape: _getCardShape(widget.design),
-                      child: Container(
-                        padding: widget.design == 'minimaliste' ? const EdgeInsets.all(12.0) : const EdgeInsets.all(16.0),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [cardColor, Colors.white],
-                          ),
-                        ),
-                        child: _buildRectangularContent(
-                          isMinimaliste: widget.design == 'minimaliste',
-                          isSpecialShape: isSpecialShape,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            )
-        );
-      },
-    );
-  }
-
-// --- AMÉLIORATION : Contenu conditionnel pour les formes spéciales
-  Widget _buildRectangularContent({
-    required bool isMinimaliste,
-    double? titleFontSize,
-    int? titleMaxLines,
-    bool isSpecialShape = false,
-  }) {
-    if (isSpecialShape) {
-      // Pour les formes spéciales (cœur, étoile, rond), on retire le 'Padding'
-      // redondant pour que le texte remplisse mieux la forme, comme pour les souvenirs.
-      return Center(
-        child: Text(
-          widget.journee.texte1 ?? 'Aucune description',
-          textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 16, color: Colors.black87, height: 1.4),
-          maxLines: 5,
-          overflow: TextOverflow.ellipsis,
-        ),
-      );
-    }
-
-    // Le reste de la logique pour les cartes "standard" et "minimaliste" reste inchangé.
-    if (isMinimaliste) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(widget.journee.emoji ?? '', style: const TextStyle(fontSize: 24)),
-              Text(
-                DateFormat('dd/MM/yyyy').format(widget.journee.date),
-                style: const TextStyle(color: Colors.grey, fontStyle: FontStyle.italic, fontSize: 11),
-              ),
-            ],
-          ),
-          Expanded(
-            child: Center(
-              child: Text(
-                widget.journee.texte1 ?? 'Aucune description',
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 14, color: Colors.black87, height: 1.4),
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-              ),
             ),
-          ),
-          Align(
-            alignment: Alignment.bottomRight,
-            child: Text(
-              'Note: ${widget.journee.note ?? 'N/A'}',
-              style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey, fontSize: 11),
-            ),
-          ),
-        ],
-      );
-    } else {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (widget.journee.isRepost)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 4.0),
-              child: Text(
-                'De ${widget.journee.repostedFromUserName ?? 'un ami'}',
-                style: const TextStyle(fontSize: 11, color: Colors.grey),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(widget.journee.emoji ?? '', style: const TextStyle(fontSize: 28)),
-              Chip(
-                label: Text(
-                  widget.journee.estPublic ? 'Public' : 'Privé',
-                  style: TextStyle(
-                      color: widget.journee.estPublic ? Colors.green : Colors.red,
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold),
-                ),
-                backgroundColor: widget.journee.estPublic ? Colors.green.shade50 : Colors.red.shade50,
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          SingleChildScrollView(
-            child: Text(
-              widget.journee.texte1 ?? 'Aucune description',
-              style: const TextStyle(fontSize: 15, color: Colors.black87, height: 1.4),
-            ),
-          ),
-          if (widget.journee.photoUrls.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            SizedBox(
-              height: 60,
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                itemCount: widget.journee.photoUrls.length,
-                itemBuilder: (context, index) {
-                  final imageUrl = widget.journee.photoUrls[index];
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 6.0),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(8.0),
-                      child: Image.network(imageUrl, width: 60, height: 60, fit: BoxFit.cover),
-                    ),
-                  );
-                },
+            Positioned.fill(
+              child: Padding(
+                padding: EdgeInsets.all(_cardWidth / 6),
+                child: widget.contentBuilder(context, widget.data),
               ),
             ),
           ],
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                DateFormat('yyyy-MM-dd').format(widget.journee.date),
-                style: const TextStyle(color: Colors.grey, fontStyle: FontStyle.italic, fontSize: 11),
-              ),
-              Text(
-                'Note: ${widget.journee.note ?? 'Non évaluée'}',
-                style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey, fontSize: 11),
-              ),
-            ],
-          ),
-        ],
-      );
-    }
+        ),
+      ),
+    );
   }
+
+  String _getImagePath(String design, String color) {
+    final safeDesign = design.isNotEmpty ? design : 'carrer';
+    final safeColor = color.isNotEmpty ? color : 'bleu';
+    return 'assets/${safeDesign}_${safeColor}.png';
+  }
+
   @override
   void dispose() {
-    _isAnimating = false;
-    _controller.dispose();
+    _fadeTimer?.cancel();
+    _moveController.removeListener(_tick);
+    _moveController.dispose();
+    _effectController.removeListener(_updateFloatOffset);
+    _effectController.dispose();
     super.dispose();
   }
 }
 
 class _BlinkingDots extends StatefulWidget {
   const _BlinkingDots({Key? key}) : super(key: key);
-
   @override
   _BlinkingDotsState createState() => _BlinkingDotsState();
 }
 
-class _BlinkingDotsState extends State<_BlinkingDots> with SingleTickerProviderStateMixin {
+class _BlinkingDotsState extends State<_BlinkingDots>
+    with SingleTickerProviderStateMixin {
   late AnimationController _controller;
-
   @override
   void initState() {
     super.initState();
@@ -2880,15 +4034,18 @@ class _BlinkingDotsState extends State<_BlinkingDots> with SingleTickerProviderS
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: _controller,
-      builder: (context, child) {
-        return Opacity(
-          opacity: _controller.value,
-          child: const Text(
-            '...',
-            style: TextStyle(fontSize: 15, color: Colors.grey, fontWeight: FontWeight.w600),
+      builder:
+          (context, child) => Opacity(
+            opacity: _controller.value,
+            child: const Text(
+              '...',
+              style: TextStyle(
+                fontSize: 15,
+                color: Colors.grey,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
-        );
-      },
     );
   }
 
@@ -2898,26 +4055,28 @@ class _BlinkingDotsState extends State<_BlinkingDots> with SingleTickerProviderS
     super.dispose();
   }
 }
+
 class HomePage extends StatefulWidget {
   const HomePage({Key? key}) : super(key: key);
-
   @override
   HomePageState createState() => HomePageState();
 }
 
 class HomePageState extends State<HomePage>
     with SingleTickerProviderStateMixin, AutomaticKeepAliveClientMixin {
+  // ... Le reste de HomePageState reste inchangé ...
   TabController? _tabController;
   List<JourneeModel> _myJournees = [];
   List<SouvenirModel> _mySouvenirs = [];
   ValueNotifier<String> journeeFilterNotifier = ValueNotifier<String>('tout');
   ValueNotifier<String> souvenirFilterNotifier = ValueNotifier<String>('tout');
+  bool _isFullScreen = false;
   List<JourneeModel> _displayedJournees = [];
   List<JourneeModel> _filteredJournees = [];
   List<SouvenirModel> _displayedSouvenirs = [];
   List<SouvenirModel> _filteredSouvenirs = [];
   late Future<String> _cardSizeFuture;
-
+final ValueNotifier<String> _tabTitleNotifier = ValueNotifier<String>('Mes Journées');
   List<JourneeModel> _friendsJournees = [];
   List<JourneeModel> _globalJournees = [];
   List<SouvenirModel> _souvenirs = [];
@@ -2925,7 +4084,9 @@ class HomePageState extends State<HomePage>
   final _firestore = FirebaseFirestore.instance;
   DateTime _today = DateTime.now();
   bool _isLoading = false;
-  ValueNotifier<Brightness> appBrightnessNotifier = ValueNotifier<Brightness>(Brightness.light);
+  ValueNotifier<Brightness> appBrightnessNotifier = ValueNotifier<Brightness>(
+    Brightness.light,
+  );
 
   late PageController _verticalMainPageController;
   late PageController _journeePageController;
@@ -2940,8 +4101,29 @@ class HomePageState extends State<HomePage>
   int? _note;
   bool _isNoteObtained = false;
   static const int _maxDisplayedCards = 100;
+
+  // Futures pour la personnalisation
   late Future<String> _journeeCardDesignFuture;
   late Future<String> _souvenirCardDesignFuture;
+  late Future<String> _journeeCardAnimationFuture;
+  late Future<String> _souvenirCardAnimationFuture;
+
+  // AJOUT : Futures pour les couleurs
+  late Future<String> _journeeCardColorFuture;
+  late Future<String> _souvenirCardColorFuture;
+  // Nouveaux futures pour forcer les couleurs globales
+  late Future<bool> _forceGlobalJourneeColorFuture;
+  late Future<bool> _forceGlobalSouvenirColorFuture;
+  int _friendRequestCount = 0;
+  StreamSubscription<QuerySnapshot>? _friendRequestsSubscription;
+
+  // --- NOUVELLES VARIABLES D'ÉTAT POUR L'ONGLET MONDIAL ---
+  bool _shareInGlobalFeed = false;
+  String _globalFilter = 'mon_pays'; // Options: 'mon_pays' ou 'tous_les_pays'
+  String? _currentUserCountry;
+  bool _isLoadingGlobalPrefs = true;
+  // --- FIN DES NOUVELLES VARIABLES ---
+
   @override
   bool get wantKeepAlive => true;
   bool _isVip = false;
@@ -2955,41 +4137,128 @@ class HomePageState extends State<HomePage>
     _journeePageController = PageController(viewportFraction: 0.85);
     _scheduleMidnightUpdate();
     _loadAppBrightness();
+    _loadGlobalPreferences(); // <-- NOUVEL APPEL
     _setupRealtimeListeners();
-    _cardSizeFuture = _getCardSizeFromPreferences(); // <-- AJOUTEZ CETTE LIGNE
+    _listenToFriendRequests();
+
+    _cardSizeFuture = _getCardSizeFromPreferences();
 
     journeeFilterNotifier.addListener(_updateDisplayedJournees);
     souvenirFilterNotifier.addListener(_updateDisplayedSouvenirs);
     _loadVipStatus();
 
-    _journeeCardDesignFuture = _getJourneeCardDesignFromPreferences();
-    _souvenirCardDesignFuture = _getCardDesignFromPreferences();
+    // Charger toutes les préférences de personnalisation
+    _journeeCardDesignFuture = _getPreference('journeeCardDesign', 'carrer');
+    _souvenirCardDesignFuture = _getPreference('cardDesign', 'carrer');
+    _journeeCardAnimationFuture = _getPreference(
+      'journeeAnimation',
+      'rebondissant',
+    );
+    _souvenirCardAnimationFuture = _getPreference(
+      'cardAnimation',
+      'rebondissant',
+    );
+    // AJOUT : Chargement des préférences de couleur
+    _journeeCardColorFuture = _getPreference('journeeCardColor', 'bleu');
+    _souvenirCardColorFuture = _getPreference('cardColor', 'bleu');
+    // Initialisation des switches pour forcer les couleurs
+    _forceGlobalJourneeColorFuture = _getPreferenceBool(
+      'forceGlobalJourneeColor',
+      false,
+    );
+    _forceGlobalSouvenirColorFuture = _getPreferenceBool(
+      'forceGlobalSouvenirColor',
+      false,
+    );
   }
+
+  Future<bool> _getPreferenceBool(String key, bool defaultValue) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(key) ?? defaultValue;
+  }
+
   Future<void> _loadVipStatus() async {
     final data = await getUserSubscriptionData();
-    if(mounted) {
+    if (mounted) {
       setState(() {
         _isVip = data['isVip'];
       });
     }
   }
+
+  // --- NOUVELLE MÉTHODE POUR CHARGER LES PRÉFÉRENCES MONDIALES ---
+  Future<void> _loadGlobalPreferences() async {
+    setState(() => _isLoadingGlobalPrefs = true);
+    final prefs = await SharedPreferences.getInstance();
+    final currentUser = FirebaseAuth.instance.currentUser;
+
+    if (currentUser != null) {
+      try {
+        final userDoc =
+            await _firestore.collection('users').doc(currentUser.uid).get();
+        if (userDoc.exists) {
+          // IMPORTANT: Suppose que le document utilisateur a un champ 'country'.
+          // Exemple: 'FR' pour la France. Ce champ est généralement défini lors de l'inscription par numéro de téléphone.
+          _currentUserCountry = userDoc.data()?['country'];
+        }
+      } catch (e) {
+        print("Erreur de récupération du pays de l'utilisateur: $e");
+      }
+    }
+
+    if (mounted) {
+      setState(() {
+        _shareInGlobalFeed = prefs.getBool('shareInGlobalFeed') ?? false;
+        _isLoadingGlobalPrefs = false;
+      });
+    }
+  }
+
+  void _listenToFriendRequests() {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) return;
+
+    // On s'assure de ne pas avoir de listener fantôme
+    _friendRequestsSubscription?.cancel();
+
+    _friendRequestsSubscription = _firestore
+        .collection('friend_requests')
+        .where('receiverId', isEqualTo: currentUser.uid)
+        .where('status', isEqualTo: 'pending')
+        .snapshots()
+        .listen(
+          (snapshot) {
+            if (mounted) {
+              setState(() {
+                _friendRequestCount = snapshot.docs.length;
+              });
+            }
+          },
+          onError: (e) {
+            print('Erreur lors de l\'écoute des demandes d\'amis: $e');
+          },
+        );
+  }
+
   Future<String> _getCardSizeFromPreferences() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
-    // La clé 'cardSize' doit correspondre à celle que vous sauvegardez dans profil_page.dart
     return prefs.getString('cardSize') ?? 'normal';
   }
+
+  Future<String> _getPreference(String key, String defaultValue) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    return prefs.getString(key) ?? defaultValue;
+  }
+
   Future<Map<String, dynamic>> _getUserData(String userId) async {
-    // Si l'utilisateur est déjà dans le cache, on le retourne immédiatement
     if (_userCache.containsKey(userId)) {
       return _userCache[userId]!;
     }
 
-    // Sinon, on va le chercher dans Firestore
     try {
       final userDoc = await _firestore.collection('users').doc(userId).get();
       if (userDoc.exists) {
         final userData = userDoc.data() as Map<String, dynamic>;
-        // On met à jour le cache pour les prochaines fois
         if (mounted) {
           setState(() {
             _userCache[userId] = userData;
@@ -3000,17 +4269,24 @@ class HomePageState extends State<HomePage>
     } catch (e) {
       print("Erreur de récupération des données utilisateur pour $userId: $e");
     }
-    // Retourne une valeur par défaut en cas d'erreur
     return {'username': 'Utilisateur Inconnu'};
   }
 
+  // Dans la classe HomePageState de votre fichier home_page.dart
+
   void _updateDisplayedJournees() {
     setState(() {
-      _filteredJournees = _filterJournees(_myJournees, journeeFilterNotifier.value)
-          .where((j) => j.note != null)
-          .toList();
-      _displayedJournees = _filteredJournees.take(_maxDisplayedCards).toList();
+      _filteredJournees = _filterJournees(
+        _myJournees,
+        journeeFilterNotifier.value,
+      );
 
+      // --- ON CRÉE UNE COPIE ET ON LA MÉLANGE ICI ---
+      List<JourneeModel> listeMelangee = List.from(_filteredJournees);
+      listeMelangee.shuffle();
+      // ----------------------------------------------
+
+      _displayedJournees = listeMelangee.take(_maxDisplayedCards).toList();
 
       _journeeZOrders.clear();
       for (var i = 0; i < _displayedJournees.length; i++) {
@@ -3021,10 +4297,21 @@ class HomePageState extends State<HomePage>
       }
     });
   }
+
   void _updateDisplayedSouvenirs() {
     setState(() {
-      _filteredSouvenirs = _filterSouvenirs(_mySouvenirs, souvenirFilterNotifier.value);
-      _displayedSouvenirs = _filteredSouvenirs.take(_maxDisplayedCards).toList();
+      _filteredSouvenirs = _filterSouvenirs(
+        _mySouvenirs,
+        souvenirFilterNotifier.value,
+      );
+
+      // --- ON CRÉE UNE COPIE ET ON LA MÉLANGE ICI ---
+      List<SouvenirModel> listeMelangee = List.from(_filteredSouvenirs);
+      listeMelangee.shuffle();
+      // ----------------------------------------------
+
+      _displayedSouvenirs = listeMelangee.take(_maxDisplayedCards).toList();
+
       _souvenirZOrders.clear();
       for (var i = 0; i < _displayedSouvenirs.length; i++) {
         final souvenir = _displayedSouvenirs[i];
@@ -3035,16 +4322,11 @@ class HomePageState extends State<HomePage>
     });
   }
 
-
   void _setupRealtimeListeners() {
     if (!mounted) return;
 
     User? currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) return;
-
-    final now = DateTime.now();
-    final startOfToday = DateTime(now.year, now.month, now.day);
-    final endOfToday = startOfToday.add(const Duration(days: 1));
 
     setState(() {
       _isLoading = true;
@@ -3054,91 +4336,133 @@ class HomePageState extends State<HomePage>
         .collection('journees')
         .where('userId', isEqualTo: currentUser.uid)
         .snapshots()
-        .listen((snapshot) {
-      if (mounted) {
-        setState(() {
-          _myJournees = snapshot.docs
-              .map((doc) => JourneeModel.fromFirestore(doc))
-              .toList();
-          _isLoading = false;
-          _updateDisplayedJournees();
-        });
-      }
-    }, onError: (e) {
-      print('Erreur lors de l\'écoute des journées: $e');
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    });
+        .listen(
+          (snapshot) {
+            if (mounted) {
+              setState(() {
+                _myJournees =
+                    snapshot.docs
+                        .map((doc) => JourneeModel.fromFirestore(doc))
+                        .toList();
+                _isLoading = false;
+                _updateDisplayedJournees();
+              });
+            }
+          },
+          onError: (e) {
+            print('Erreur lors de l\'écoute des journées: $e');
+            if (mounted) {
+              setState(() {
+                _isLoading = false;
+              });
+            }
+          },
+        );
 
     _loadFriends().then((_) {
       if (_friendIds.isNotEmpty) {
+        final _fNow = DateTime.now();
+        final _fStartOfToday = DateTime(_fNow.year, _fNow.month, _fNow.day);
+        final _fEndOfToday = _fStartOfToday.add(const Duration(days: 1));
         _friendsJourneesSubscription = _firestore
             .collection('journees')
             .where('userId', whereIn: _friendIds)
             .where('estPublic', isEqualTo: true)
-        // --- CORRECTION ---
-        // 1. On supprime les filtres de date pour charger l'historique
-        // .where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfToday)) // Supprimé
-        // .where('date', isLessThan: Timestamp.fromDate(endOfToday)) // Supprimé
-
-        // 2. On trie par date pour afficher les plus récentes en premier
-            .orderBy('date', descending: true) // Ajouté
-
-        // 3. On ajoute une limite pour optimiser les performances et les coûts
-            .limit(50) // Ajouté (charge les 50 journées les plus récentes)
-
+            .where(
+              'date',
+              isGreaterThanOrEqualTo: Timestamp.fromDate(_fStartOfToday),
+            )
+            .where('date', isLessThan: Timestamp.fromDate(_fEndOfToday))
+            .orderBy('date', descending: true)
+            .limit(50)
             .snapshots()
-            .listen((snapshot) {
-          if (mounted) {
-            setState(() {
-              _friendsJournees = snapshot.docs
-                  .map((doc) => JourneeModel.fromFirestore(doc))
-                  .toList();
-            });
-          }
-        }, onError: (e) {
-          print('Erreur lors de l\'écoute des journées des amis: $e');
-        });
+            .listen(
+              (snapshot) {
+                if (mounted) {
+                  setState(() {
+                    _friendsJournees =
+                        snapshot.docs
+                            .map((doc) => JourneeModel.fromFirestore(doc))
+                            .toList();
+                  });
+                }
+              },
+              onError: (e) {
+                print('Erreur lors de l\'écoute des journées des amis: $e');
+              },
+            );
       }
     });
 
-    _globalJourneesSubscription = _firestore
-        .collection('journees')
-        .where('estPublic', isEqualTo: true)
-        .where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfToday))
-        .where('date', isLessThan: Timestamp.fromDate(endOfToday))
-        .snapshots()
-        .listen((snapshot) {
-      if (mounted) {
-        setState(() {
-          _globalJournees = snapshot.docs
-              .map((doc) => JourneeModel.fromFirestore(doc))
-              .toList();
-        });
-      }
-    }, onError: (e) {
-      print('Erreur lors de l\'écoute des journées mondiales: $e');
-    });
+    // Remplacé par une méthode dynamique pour permettre le filtrage
+    _setupGlobalJourneesListener();
 
     _mySouvenirsSubscription = _firestore
         .collection('souvenirs')
         .where('userId', isEqualTo: currentUser.uid)
         .snapshots()
-        .listen((snapshot) {
-      if (mounted) {
-        setState(() {
-          _mySouvenirs = snapshot.docs
-              .map((doc) => SouvenirModel.fromFirestore(doc))
-              .toList();
-          _updateDisplayedSouvenirs();
-        });
-      }
-    }, onError: (e) {
-      print('Erreur lors de l\'écoute des souvenirs: $e');
-    });
+        .listen(
+          (snapshot) {
+            if (mounted) {
+              setState(() {
+                _mySouvenirs =
+                    snapshot.docs
+                        .map((doc) => SouvenirModel.fromFirestore(doc))
+                        .toList();
+                _updateDisplayedSouvenirs();
+              });
+            }
+          },
+          onError: (e) {
+            print('Erreur lors de l\'écoute des souvenirs: $e');
+          },
+        );
+  }
+
+  // --- NOUVELLE MÉTHODE POUR LE LISTENER DYNAMIQUE MONDIAL ---
+  void _setupGlobalJourneesListener() {
+    if (!mounted) return;
+
+    _globalJourneesSubscription?.cancel();
+
+    final now = DateTime.now();
+    final startOfToday = DateTime(now.year, now.month, now.day);
+    final endOfToday = startOfToday.add(const Duration(days: 1));
+
+    Query query = _firestore
+        .collection('journees')
+        .where('estPublic', isEqualTo: true)
+        .where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfToday))
+        .where('date', isLessThan: Timestamp.fromDate(endOfToday));
+
+    _globalJourneesSubscription = query.snapshots().listen(
+      (snapshot) {
+        if (mounted) {
+          List<JourneeModel> fetchedJournees =
+              snapshot.docs
+                  .map((doc) => JourneeModel.fromFirestore(doc))
+                  .toList();
+
+          if (_globalFilter == 'mon_pays' &&
+              _currentUserCountry != null &&
+              _currentUserCountry!.isNotEmpty) {
+            fetchedJournees =
+                fetchedJournees
+                    .where(
+                      (journee) => journee.userCountry == _currentUserCountry,
+                    )
+                    .toList();
+          }
+
+          setState(() {
+            _globalJournees = fetchedJournees;
+          });
+        }
+      },
+      onError: (e) {
+        print('Erreur lors de l\'écoute des journées mondiales filtrées: $e');
+      },
+    );
   }
 
   void _scheduleMidnightUpdate() {
@@ -3163,6 +4487,7 @@ class HomePageState extends State<HomePage>
     _tabController?.dispose();
     _verticalMainPageController.dispose();
     _journeePageController.dispose();
+    _friendRequestsSubscription?.cancel();
     _myJourneesSubscription?.cancel();
     _friendsJourneesSubscription?.cancel();
     _globalJourneesSubscription?.cancel();
@@ -3170,6 +4495,7 @@ class HomePageState extends State<HomePage>
     _controller.dispose();
     journeeFilterNotifier.removeListener(_updateDisplayedJournees);
     souvenirFilterNotifier.removeListener(_updateDisplayedSouvenirs);
+    _tabTitleNotifier.dispose();
     super.dispose();
   }
 
@@ -3184,7 +4510,8 @@ class HomePageState extends State<HomePage>
       } else if (themeMode == 'light') {
         loadedBrightness = Brightness.light;
       } else {
-        loadedBrightness = WidgetsBinding.instance.platformDispatcher.platformBrightness;
+        loadedBrightness =
+            WidgetsBinding.instance.platformDispatcher.platformBrightness;
       }
 
       if (mounted) {
@@ -3202,17 +4529,19 @@ class HomePageState extends State<HomePage>
     if (currentUser == null) return;
 
     try {
-      QuerySnapshot friendsSnapshot = await _firestore
-          .collection('friends')
-          .where('users', arrayContains: currentUser.uid)
-          .get();
+      QuerySnapshot friendsSnapshot =
+          await _firestore
+              .collection('friends')
+              .where('users', arrayContains: currentUser.uid)
+              .get();
 
       if (mounted) {
         setState(() {
-          _friendIds = friendsSnapshot.docs.map((doc) {
-            List<String> users = List<String>.from(doc['users']);
-            return users.firstWhere((id) => id != currentUser.uid);
-          }).toList();
+          _friendIds =
+              friendsSnapshot.docs.map((doc) {
+                List<String> users = List<String>.from(doc['users']);
+                return users.firstWhere((id) => id != currentUser.uid);
+              }).toList();
         });
       }
     } catch (e) {
@@ -3227,37 +4556,71 @@ class HomePageState extends State<HomePage>
     final startOfDay = DateTime(date.year, date.month, date.day);
     final endOfDay = DateTime(date.year, date.month, date.day, 23, 59, 59, 999);
 
-    final querySnapshot = await _firestore
-        .collection('journees')
-        .where('userId', isEqualTo: currentUser.uid)
-        .where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
-        .where('date', isLessThanOrEqualTo: Timestamp.fromDate(endOfDay))
-        .get();
+    final querySnapshot =
+        await _firestore
+            .collection('journees')
+            .where('userId', isEqualTo: currentUser.uid)
+            .where(
+              'date',
+              isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay),
+            )
+            .where('date', isLessThanOrEqualTo: Timestamp.fromDate(endOfDay))
+            .get();
 
     return querySnapshot.docs.isNotEmpty;
   }
 
   Future<void> _showConseilsDialog(JourneeModel journee) async {
-    if (DEEPSEEK_API_KEY == 'VOTRE_CLÉ_API_DEEPSEEK') {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Clé API DeepSeek non configurée.')),
-      );
-      return;
+    // 1. Vérifier si les conseils existent déjà dans Firestore pour éviter de régénérer
+    if (journee.id != null) {
+      try {
+        DocumentSnapshot doc = await FirebaseFirestore.instance.collection('journees').doc(journee.id).get();
+        if (doc.exists) {
+          Map<String, dynamic>? data = doc.data() as Map<String, dynamic>?;
+          if (data != null && data.containsKey('conseilsIA') && data['conseilsIA'] is List) {
+            List<String> savedConseils = List<String>.from(data['conseilsIA']);
+            if (savedConseils.isNotEmpty) {
+              _afficherPopupConseils(savedConseils);
+              return; // On arrête ici, pas besoin d'appeler l'API !
+            }
+          }
+        }
+      } catch (e) {
+        print("Erreur lors de la vérification du cache des conseils: $e");
+      }
     }
 
+    // 2. Si aucun conseil n'est sauvegardé, on affiche le loader et on appelle l'IA
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
+
     try {
-      const url = 'https://api.deepseek.com/v1/chat/completions';
-      final currentUser = FirebaseAuth.instance.currentUser;
+      const url = 'https://api.deepinfra.com/v1/openai/chat/completions';
+      String texteAnalyse = journee.texte1 ?? journee.commentaire ?? 'Aucun détail fourni.';
 
       String prompt = '''
-      Analyse cette journée et donne-moi 5 conseils courts et précis pour l'améliorer :
+Tu es un coach de vie bienveillant et un psychologue expert. 
+Lis attentivement le récit de la journée suivante.
 
-      Texte : ${journee.texte1 ?? ''}
-      Note : ${journee.note ?? 'Non notée'}
-      Emoji : ${journee.emoji ?? 'Aucun'}
+Récit :
+"$texteAnalyse"
 
-      Chaque conseil ne doit pas dépasser 1-2 phrases. Sois constructif et bienveillant.
-      ''';
+Génère EXACTEMENT 3 conseils courts, personnalisés, constructifs et réconfortants basés EXCLUSIVEMENT sur ce récit. 
+Ne donne pas de conseils génériques hors contexte. Formule les conseils directement à la deuxième personne ("Tu", "Pense à...").
+
+IMPORTANT: Tu DOIS renvoyer UNIQUEMENT un objet JSON valide.
+Format attendu:
+{
+  "conseils": [
+    "Premier conseil ici.",
+    "Deuxième conseil ici.",
+    "Troisième conseil ici."
+  ]
+}
+''';
 
       final response = await http.post(
         Uri.parse(url),
@@ -3266,59 +4629,164 @@ class HomePageState extends State<HomePage>
           'Authorization': 'Bearer $DEEPSEEK_API_KEY',
         },
         body: jsonEncode({
-          'model': 'deepseek-chat',
-          'max_tokens': 200,
+          'model': await resolveAiModel(isVip: _isVip),
+          'max_tokens': 300,
           'messages': [
-            {
-              'role': 'user',
-              'content': prompt
-            }
-          ]
+            {'role': 'user', 'content': prompt},
+          ],
         }),
       );
 
+      Navigator.pop(context); // Fermer le loader
+
       if (response.statusCode == 200) {
         final responseData = jsonDecode(utf8.decode(response.bodyBytes));
-        final conseils = responseData['choices'][0]['message']['content'];
+        String content = responseData['choices'][0]['message']['content'];
 
-        if (currentUser != null && journee.id != null) {
-          await FirebaseFirestore.instance
-              .collection('journees')
-              .doc(journee.id)
-              .update({
-            'conseils': conseils,
-            'dateConseil': FieldValue.serverTimestamp(),
+        // --- NETTOYAGE ROBUSTE ---
+        // Supprimer les balises de réflexion de l'IA (ex: <think> ... </think> ou <thought> ... </thought>)
+        content = content.replaceAll(RegExp(r'<think>[\s\S]*?<\/think>', dotAll: true), '');
+        content = content.replaceAll(RegExp(r'<thought>[\s\S]*?<\/thought>', dotAll: true), '');
+
+        // Enlever les balises markdown (```json)
+        content = content.replaceAll(RegExp(r'^```(?:json)?\s*|\s*```$', multiLine: true), '').trim();
+        
+        // Extraire uniquement l'objet JSON
+        final jsonMatch = RegExp(r'\{[\s\S]*\}').firstMatch(content);
+        if (jsonMatch != null) {
+          content = jsonMatch.group(0)!;
+        }
+
+        List<String> conseilsList = [];
+        try {
+          final parsed = jsonDecode(content);
+          if (parsed['conseils'] is List) {
+            conseilsList = List<String>.from(parsed['conseils']);
+          } else {
+            conseilsList = [content]; // Fallback si le format est étrange
+          }
+        } catch (e) {
+          // En cas d'échec total du JSON, on affiche le contenu nettoyé
+          conseilsList = [content];
+        }
+
+        // 3. Sauvegarder les conseils générés dans Firebase pour ne pas rappeler l'IA la prochaine fois
+        if (journee.id != null && conseilsList.isNotEmpty) {
+          await FirebaseFirestore.instance.collection('journees').doc(journee.id).update({
+            'conseilsIA': conseilsList
           });
         }
 
-        showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('Conseils pour votre journée', style: TextStyle(color: Colors.blue)),
-            content: SingleChildScrollView(
-              child: Text(conseils, style: const TextStyle(fontSize: 16)),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Fermer', style: TextStyle(color: Colors.blue)),
-              ),
-            ],
-          ),
-        );
+        _afficherPopupConseils(conseilsList);
+
       } else {
-        print('Erreur API DeepSeek: ${response.body}');
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Erreur lors de la génération des conseils')),
+          const SnackBar(content: Text('Impossible de générer les conseils')),
         );
       }
     } catch (e) {
-      print('Erreur : $e');
+      Navigator.pop(context); // Fermer loader
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Impossible de générer les conseils')),
+        const SnackBar(content: Text('Erreur inattendue de génération IA')),
       );
     }
   }
+
+  // --- SOUS-MÉTHODE POUR AFFICHER LE POPUP ---
+  void _afficherPopupConseils(List<String> conseilsList) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        title: Row(
+          children: [
+            Icon(Icons.psychology, color: Colors.blue.shade700),
+            const SizedBox(width: 10),
+            const Text(
+              'Conseils IA',
+              style: TextStyle(color: Colors.blue, fontSize: 18),
+            ),
+          ],
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.separated(
+            shrinkWrap: true,
+            itemCount: conseilsList.length,
+            separatorBuilder: (_, __) => const Divider(),
+            itemBuilder: (context, index) {
+              return ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: Colors.blue.shade100,
+                  radius: 12,
+                  child: Text(
+                    '${index + 1}',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+                title: Text(
+                  conseilsList[index],
+                  style: const TextStyle(fontSize: 14),
+                ),
+                contentPadding: EdgeInsets.zero,
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Fermer'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showReactionsDetailsDialog(JourneeModel journee) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        final isDark = appBrightnessNotifier.value == Brightness.dark;
+        return AlertDialog(
+          backgroundColor: isDark ? Colors.grey[900] : Colors.white,
+          title: Text(
+            'Réactions',
+            style: TextStyle(color: isDark ? Colors.white : Colors.black),
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: journee.reactions.keys.length,
+              itemBuilder: (context, index) {
+                String emoji = journee.reactions.keys.elementAt(index);
+                List<String> users = journee.reactions[emoji] ?? [];
+                return ListTile(
+                  leading: Text(emoji, style: const TextStyle(fontSize: 24)),
+                  title: Text(
+                    '${users.length} personne(s)',
+                    style: TextStyle(
+                      color: isDark ? Colors.white70 : Colors.black87,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Fermer'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   void _sendJourneeToBack(JourneeModel journee) {
     if (journee.id == null || _journeeZOrders.isEmpty) return;
     final minZ = _journeeZOrders.values.reduce((a, b) => a < b ? a : b);
@@ -3332,7 +4800,8 @@ class HomePageState extends State<HomePage>
     if (_filteredJournees.length <= _maxDisplayedCards) return;
 
     final displayedIds = _displayedJournees.map((j) => j.id).toSet();
-    final availableToDisplay = _filteredJournees.where((j) => !displayedIds.contains(j.id)).toList();
+    final availableToDisplay =
+        _filteredJournees.where((j) => !displayedIds.contains(j.id)).toList();
 
     if (availableToDisplay.isNotEmpty) {
       setState(() {
@@ -3343,6 +4812,7 @@ class HomePageState extends State<HomePage>
       });
     }
   }
+
   void _sendSouvenirToBack(SouvenirModel souvenir) {
     if (souvenir.id == null || _souvenirZOrders.isEmpty) return;
     final minZ = _souvenirZOrders.values.reduce((a, b) => a < b ? a : b);
@@ -3355,7 +4825,8 @@ class HomePageState extends State<HomePage>
     if (_filteredSouvenirs.length <= _maxDisplayedCards) return;
 
     final displayedIds = _displayedSouvenirs.map((s) => s.id).toSet();
-    final availableToDisplay = _filteredSouvenirs.where((s) => !displayedIds.contains(s.id)).toList();
+    final availableToDisplay =
+        _filteredSouvenirs.where((s) => !displayedIds.contains(s.id)).toList();
 
     if (availableToDisplay.isNotEmpty) {
       setState(() {
@@ -3367,13 +4838,98 @@ class HomePageState extends State<HomePage>
     }
   }
 
+  void _toggleGlobalSharing(bool value) async {
+    if (!mounted) return;
+
+    setState(() {
+      _shareInGlobalFeed = value;
+    });
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('shareInGlobalFeed', value);
+
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) return;
+
+    // On recherche la journée postée AUJOURD'HUI par l'utilisateur
+    final todayStart = DateTime(_today.year, _today.month, _today.day);
+    final todayEnd = todayStart.add(const Duration(days: 1));
+
+    final querySnapshot =
+        await _firestore
+            .collection('journees')
+            .where('userId', isEqualTo: currentUser.uid)
+            .where(
+              'date',
+              isGreaterThanOrEqualTo: Timestamp.fromDate(todayStart),
+            )
+            .where('date', isLessThan: Timestamp.fromDate(todayEnd))
+            .limit(1)
+            .get();
+
+    // Si une journée existe pour aujourd'hui, on la met à jour
+    if (querySnapshot.docs.isNotEmpty) {
+      final docId = querySnapshot.docs.first.id;
+
+      // On prépare les données à mettre à jour
+      final Map<String, dynamic> updateData = {'estPublic': value};
+
+      // --- C'EST LA PARTIE CRUCIALE ---
+      // Si l'utilisateur active le partage ET que son pays est connu...
+      if (value &&
+          _currentUserCountry != null &&
+          _currentUserCountry!.isNotEmpty) {
+        // ...on ajoute le pays de l'utilisateur au document de la journée.
+        updateData['userCountry'] = _currentUserCountry!;
+      } else if (!value) {
+        // Optionnel mais propre : si l'utilisateur rend sa journée privée,
+        // on peut retirer le champ 'userCountry'
+        updateData['userCountry'] = FieldValue.delete();
+      }
+      // --- FIN DE LA PARTIE CRUCIALE ---
+
+      await _firestore.collection('journees').doc(docId).update(updateData);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              value
+                  ? 'Votre journée est maintenant visible dans le fil mondial.'
+                  : 'Votre journée n\'est plus visible dans le fil mondial.',
+            ),
+            backgroundColor: value ? Colors.green : Colors.orange,
+          ),
+        );
+      }
+    } else {
+      // Si aucune journée n'a été postée aujourd'hui
+      if (value && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Postez votre journée d\'aujourd\'hui pour qu\'elle apparaisse dans le fil mondial.',
+            ),
+            backgroundColor: Colors.blue,
+          ),
+        );
+      }
+    }
+  }
+
+  void _onGlobalFilterChanged(String newFilter) {
+    if (_globalFilter == newFilter) return;
+    setState(() {
+      _globalFilter = newFilter;
+    });
+    _setupGlobalJourneesListener();
+  }
 
   @override
   Widget build(BuildContext context) {
     super.build(context);
 
     bool hasPostedToday = _hasPostedToday();
-    ValueNotifier<String> _tabTitleNotifier = ValueNotifier<String>('Mes Journées');
+
 
     return DefaultTabController(
       length: 3,
@@ -3389,15 +4945,49 @@ class HomePageState extends State<HomePage>
             backgroundColor: isDarkMode ? Colors.black : Colors.white,
             appBar: AppBar(
               backgroundColor: appBarColor,
-              leading: IconButton(
-                icon: Icon(Icons.group_add, color: iconColor),
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (context) => const AddFriendsPage()),
-                  );
-                },
+              // --- MODIFICATION COMMENCE ICI ---
+              leading: Stack(
+                children: [
+                  IconButton(
+                    icon: Icon(Icons.group_add, color: iconColor),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const AddFriendsPage(),
+                        ),
+                      );
+                    },
+                  ),
+                  if (_friendRequestCount > 0)
+                    Positioned(
+                      right: 8,
+                      top: 8,
+                      child: Container(
+                        padding: const EdgeInsets.all(2),
+                        decoration: BoxDecoration(
+                          color: Colors.red,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        constraints: const BoxConstraints(
+                          minWidth: 16,
+                          minHeight: 16,
+                        ),
+                        child: Text(
+                          _friendRequestCount > 5
+                              ? '5+'
+                              : _friendRequestCount.toString(),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
+                ],
               ),
+              // --- MODIFICATION TERMINE ICI ---
               title: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -3407,7 +4997,8 @@ class HomePageState extends State<HomePage>
                     child: IconButton(
                       icon: Icon(
                         Icons.auto_stories,
-                        color: isDarkMode ? Colors.white : Colors.amber.shade300,
+                        color:
+                            isDarkMode ? Colors.white : Colors.amber.shade300,
                         size: 28,
                       ),
                       onPressed: () {
@@ -3447,10 +5038,41 @@ class HomePageState extends State<HomePage>
                   onPressed: () async {
                     await Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (context) => const ProfilePage()),
+                      MaterialPageRoute(
+                        builder: (context) => const ProfilePage(),
+                      ),
                     );
                     if (mounted) {
                       _loadVipStatus();
+                      // Recharger les préférences après retour de la page profil
+                      setState(() {
+                        _journeeCardDesignFuture = _getPreference(
+                          'journeeCardDesign',
+                          'carrer',
+                        );
+                        _souvenirCardDesignFuture = _getPreference(
+                          'cardDesign',
+                          'carrer',
+                        );
+                        _journeeCardAnimationFuture = _getPreference(
+                          'journeeAnimation',
+                          'rebondissant',
+                        );
+                        _souvenirCardAnimationFuture = _getPreference(
+                          'cardAnimation',
+                          'rebondissant',
+                        );
+                        _cardSizeFuture = _getCardSizeFromPreferences();
+                        // AJOUT : Recharger la couleur
+                        _journeeCardColorFuture = _getPreference(
+                          'journeeCardColor',
+                          'bleu',
+                        );
+                        _souvenirCardColorFuture = _getPreference(
+                          'cardColor',
+                          'bleu',
+                        );
+                      });
                     }
                   },
                 ),
@@ -3459,7 +5081,8 @@ class HomePageState extends State<HomePage>
                 controller: _tabController,
                 indicatorColor: iconColor,
                 labelColor: textColor,
-                unselectedLabelColor: isDarkMode ? Colors.grey : Colors.blue.shade200,
+                unselectedLabelColor:
+                    isDarkMode ? Colors.grey : Colors.blue.shade200,
                 tabs: [
                   ValueListenableBuilder<String>(
                     valueListenable: _tabTitleNotifier,
@@ -3473,7 +5096,8 @@ class HomePageState extends State<HomePage>
                 onTap: (index) {
                   if (index == 0) {
                   } else {
-                    if (_verticalMainPageController.page == 1) {
+                    if (_verticalMainPageController.hasClients &&
+                        _verticalMainPageController.page == 1) {
                       _verticalMainPageController.jumpToPage(0);
                       _tabTitleNotifier.value = 'Mes Journées';
                     }
@@ -3509,129 +5133,282 @@ class HomePageState extends State<HomePage>
     );
   }
 
+  // Dans la classe HomePageState de home_page.dart
   Widget _buildMyJourneesTab(bool hasPostedToday) {
     return LayoutBuilder(
       builder: (context, constraints) {
         return Stack(
           children: [
-            if (!hasPostedToday)
-            // ENVELOPPEZ VOTRE FUTUREBUILDER EXISTANT DANS CELUI-CI
-              FutureBuilder<String>(
-                future: _cardSizeFuture, // On charge la taille
-                builder: (context, sizeSnapshot) {
-                  if (!sizeSnapshot.hasData) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  final cardSize = sizeSnapshot.data!;
-
-                  return FutureBuilder<String>(
-                    future: _journeeCardDesignFuture,
-                    builder: (context, designSnapshot) {
-                      if (designSnapshot.connectionState == ConnectionState.waiting) {
-                        return const Center(child: CircularProgressIndicator());
-                      }
-                      final journeeCardDesign = designSnapshot.data ?? 'default';
-
-                      final sortedJournees = List<JourneeModel>.from(_displayedJournees);
-                      sortedJournees.sort((a, b) {
-                        final zA = _journeeZOrders[a.id] ?? 0.0;
-                        final zB = _journeeZOrders[b.id] ?? 0.0;
-                        return zA.compareTo(zB);
-                      });
-
-                      return Stack(
-                        fit: StackFit.expand,
-                        children: sortedJournees.map((journee) {
-                          return MovingJourneeCard(
-                            key: ValueKey(journee.id),
-                            journee: journee,
-                            design: journeeCardDesign,
-                            // UTILISEZ LA TAILLE CHARGÉE AU LIEU DE 'normal'
-                            size: cardSize,
-                            onSendToBack: () => _sendJourneeToBack(journee),
-                            onReplaceRequest: () => _replaceJournee(journee),
-                            parentConstraints: constraints,
-                          );
-                        }).toList(),
-                      );
-                    },
-                  );
-                },
-              )
-            else
+            // --- 1. CONTENU PRINCIPAL ---
+            if (_isLoading)
+              const Center(child: CircularProgressIndicator())
+            // ANCIENNE VERSION : La liste s'affiche directement sans cadre autour
+            else if (hasPostedToday)
               ValueListenableBuilder<String>(
                 valueListenable: journeeFilterNotifier,
                 builder: (context, filter, _) {
-                  final filteredJournees = _filterJournees(_myJournees, filter);
+                  final journeesAffichees =
+                      _myJournees.where((j) {
+                        final isToday =
+                            j.date.year == _today.year &&
+                            j.date.month == _today.month &&
+                            j.date.day == _today.day;
+                        return j.note != null || isToday;
+                      }).toList();
+
                   return _buildJourneeList(
-                    filteredJournees,
+                    journeesAffichees,
                     'Mes Journées',
                     showRepublishButton: false,
                     hasUserPostedToday: hasPostedToday,
                   );
                 },
+              )
+            // CAS 2 : Cartes flottantes si rien n'est posté
+            else if (_displayedJournees.isNotEmpty)
+              _buildFloatingCards(constraints)
+            // CAS 3 : Message vide
+            else
+              _buildEmptyMessage(
+                "Aucune journée à afficher. \nCréez-en une pour commencer !",
               ),
-            Positioned(
-              top: 12,
-              right: 12,
-              child: IconButton(
-                icon: Icon(
-                  Icons.filter_list,
-                  color: appBrightnessNotifier.value == Brightness.dark
-                      ? Colors.white
-                      : Colors.blue.shade700,
+
+            // --- 2. BOUTON FILTRE (En haut à droite) ---
+            if (!hasPostedToday)
+              Positioned(
+                top: 12,
+                right: 12,
+                child: IconButton(
+                  icon: Icon(
+                    Icons.filter_list,
+                    color:
+                        appBrightnessNotifier.value == Brightness.dark
+                            ? Colors.white
+                            : Colors.blue.shade700,
+                  ),
+                  onPressed:
+                      () => _showJourneeFilterDialog(journeeFilterNotifier),
                 ),
-                onPressed: () => _showJourneeFilterDialog(journeeFilterNotifier),
+              ),
+
+            // --- 3. BOUTON SIMILAIRES (En haut à gauche) ---
+            if (hasPostedToday)
+              Positioned(
+                top: 12,
+                left: 12,
+                child: _buildSimilarButton(context),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  // Séparation de la logique de contenu pour plus de lisibilité
+  Widget _buildMainContent(
+    bool hasPostedToday,
+    BoxConstraints constraints,
+    Color bgColor,
+  ) {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (hasPostedToday) {
+      // Vue en Liste
+      return ValueListenableBuilder<String>(
+        valueListenable: journeeFilterNotifier,
+        builder: (context, filter, _) {
+          final journeesAffichees =
+              _myJournees.where((j) {
+                final isToday =
+                    j.date.year == _today.year &&
+                    j.date.month == _today.month &&
+                    j.date.day == _today.day;
+                return j.note != null || isToday;
+              }).toList();
+
+          return Center(
+            child: Container(
+              constraints: BoxConstraints(
+                maxWidth:
+                    _isFullScreen
+                        ? constraints.maxWidth
+                        : constraints.maxWidth * 0.9,
+                maxHeight:
+                    _isFullScreen
+                        ? constraints.maxHeight
+                        : constraints.maxHeight * 0.85,
+              ),
+              padding:
+                  _isFullScreen
+                      ? const EdgeInsets.symmetric(horizontal: 8, vertical: 18)
+                      : const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: bgColor,
+                borderRadius: BorderRadius.circular(_isFullScreen ? 18 : 16),
+              ),
+              child: _buildJourneeList(
+                journeesAffichees,
+                'Mes Journées',
+                showRepublishButton: false,
+                hasUserPostedToday: hasPostedToday,
               ),
             ),
-            Positioned(
-              top: 12,
-              left: 12,
-              child: GestureDetector(
-                onTap: () {
-                  if (_isVip) {
-                    _showSimilarJourneesDialog();
-                  } else {
-                    showVipPromotionPopup(context, "Journées Similaires");
-                  }
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: _isVip ? Colors.blue.shade100 : Colors.grey.shade300,
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                        color: (_isVip ? Colors.blue : Colors.grey)
-                            .withOpacity(0.2),
-                        blurRadius: 5,
-                      )
-                    ],
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        _isVip ? Icons.compare_arrows : Icons.lock,
-                        color: _isVip ? Colors.blue.shade700 : Colors.grey.shade600,
-                        size: 18,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        'Similaires',
-                        style: TextStyle(
-                          color: _isVip
-                              ? Colors.blue.shade700
-                              : Colors.grey.shade600,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
+          );
+        },
+      );
+    } else if (_displayedJournees.isNotEmpty) {
+      // Vue en Cartes Flottantes (Futures imbriqués)
+      return _buildFloatingCards(constraints);
+    } else {
+      // Message Vide
+      return _buildEmptyMessage(
+        "Aucune journée à afficher. \nCréez-en une pour commencer !",
+      );
+    }
+  }
+
+  Widget _buildSimilarButton(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        if (_isVip) {
+          final todayJournee =
+              _myJournees
+                  .where(
+                    (j) =>
+                        j.date.year == _today.year &&
+                        j.date.month == _today.month &&
+                        j.date.day == _today.day,
+                  )
+                  .firstOrNull;
+
+          if (todayJournee != null && todayJournee.note != null) {
+            _showSimilarJourneesDialog();
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Confirmez votre journée d\'abord pour activer la recherche de similaires.',
                 ),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+        } else {
+          showVipPromotionPopup(context, "Journées Similaires");
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+        decoration: BoxDecoration(
+          color: _isVip ? Colors.blue.shade100 : Colors.grey.shade300,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: (_isVip ? Colors.blue : Colors.grey).withOpacity(0.2),
+              blurRadius: 5,
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              _isVip ? Icons.compare_arrows : Icons.lock,
+              color: _isVip ? Colors.blue.shade700 : Colors.grey.shade600,
+              size: 13,
+            ),
+            const SizedBox(width: 4),
+            Text(
+              'Similaires',
+              style: TextStyle(
+                color: _isVip ? Colors.blue.shade700 : Colors.grey.shade600,
+                fontWeight: FontWeight.bold,
+                fontSize: 11,
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  // Helper pour gérer la cascade de FutureBuilder des cartes
+  Widget _buildFloatingCards(BoxConstraints constraints) {
+    return FutureBuilder<String>(
+      future: _cardSizeFuture,
+      builder: (context, sizeSnapshot) {
+        if (!sizeSnapshot.hasData)
+          return const Center(child: CircularProgressIndicator());
+        return FutureBuilder<String>(
+          future: _journeeCardDesignFuture,
+          builder: (context, designSnapshot) {
+            if (!designSnapshot.hasData)
+              return const Center(child: CircularProgressIndicator());
+            return FutureBuilder<String>(
+              future: _journeeCardAnimationFuture,
+              builder: (context, animationSnapshot) {
+                if (!animationSnapshot.hasData)
+                  return const Center(child: CircularProgressIndicator());
+                return FutureBuilder<String>(
+                  future: _journeeCardColorFuture,
+                  builder: (context, colorSnapshot) {
+                    if (!colorSnapshot.hasData)
+                      return const Center(child: CircularProgressIndicator());
+                    return FutureBuilder<bool>(
+                      future: _forceGlobalJourneeColorFuture,
+                      builder: (context, forceSnapshot) {
+                        if (!forceSnapshot.hasData)
+                          return const Center(
+                            child: CircularProgressIndicator(),
+                          );
+
+                        final sortedJournees = List<JourneeModel>.from(
+                          _displayedJournees,
+                        )..sort(
+                          (a, b) => (_journeeZOrders[a.id] ?? 0.0).compareTo(
+                            _journeeZOrders[b.id] ?? 0.0,
+                          ),
+                        );
+
+                        return Stack(
+                          children:
+                              sortedJournees.map((journee) {
+                                final actualColor =
+                                    (forceSnapshot.data! ||
+                                            journee.cardColor == null)
+                                        ? colorSnapshot.data!
+                                        : journee.cardColor!;
+                                return MovingContentCard(
+                                  key: ValueKey(journee.id),
+                                  data: journee,
+                                  design: designSnapshot.data!,
+                                  color: actualColor,
+                                  animationType: animationSnapshot.data!,
+                                  size: sizeSnapshot.data!,
+                                  onSendToBack:
+                                      () => _sendJourneeToBack(journee),
+                                  onReplaceRequest:
+                                      () => _replaceJournee(journee),
+                                  parentConstraints: constraints,
+                                  contentBuilder:
+                                      (ctx, data) => _buildJourneeCardContent(
+                                        data as JourneeModel,
+                                      ),
+                                  onLongPress: () {},
+                                  onTap:
+                                      () => _showJourneeDetailDialog(journee),
+                                );
+                              }).toList(),
+                        );
+                      },
+                    );
+                  },
+                );
+              },
+            );
+          },
         );
       },
     );
@@ -3642,61 +5419,121 @@ class HomePageState extends State<HomePage>
       builder: (context, constraints) {
         return Stack(
           children: [
-            // ENVELOPPEZ VOTRE FUTUREBUILDER EXISTANT DANS CELUI-CI
-            FutureBuilder<String>(
-              future: _cardSizeFuture, // On charge la taille
-              builder: (context, sizeSnapshot) {
-                if (!sizeSnapshot.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                final cardSize = sizeSnapshot.data!;
+            if (_isLoading)
+              const Center(child: CircularProgressIndicator())
+            else if (_displayedSouvenirs.isNotEmpty)
+              FutureBuilder<String>(
+                future: _cardSizeFuture,
+                builder: (context, sizeSnapshot) {
+                  if (!sizeSnapshot.hasData)
+                    return const Center(child: CircularProgressIndicator());
+                  final cardSize = sizeSnapshot.data!;
 
-                return FutureBuilder<String>(
-                  future: _souvenirCardDesignFuture,
-                  builder: (context, designSnapshot) {
-                    if (designSnapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
-                    final cardDesign = designSnapshot.data ?? 'default';
-                    final sortedSouvenirs =
-                    List<SouvenirModel>.from(_displayedSouvenirs);
-                    sortedSouvenirs.sort((a, b) {
-                      final zA = _souvenirZOrders[a.id] ?? 0.0;
-                      final zB = _souvenirZOrders[b.id] ?? 0.0;
-                      return zA.compareTo(zB);
-                    });
+                  return FutureBuilder<String>(
+                    future: _souvenirCardDesignFuture,
+                    builder: (context, designSnapshot) {
+                      if (!designSnapshot.hasData)
+                        return const Center(child: CircularProgressIndicator());
+                      final cardDesign = designSnapshot.data!;
 
-                    return Stack(
-                      fit: StackFit.expand,
-                      children: sortedSouvenirs.map((souvenir) {
-                        return MovingSouvenirCard(
-                          key: ValueKey(souvenir.id),
-                          souvenir: souvenir,
-                          design: cardDesign,
-                          // UTILISEZ LA TAILLE CHARGÉE AU LIEU DE 'normal'
-                          size: cardSize,
-                          onSendToBack: () => _sendSouvenirToBack(souvenir),
-                          onReplaceRequest: () => _replaceSouvenir(souvenir),
-                          parentConstraints: constraints,
-                        );
-                      }).toList(),
-                    );
-                  },
-                );
-              },
-            ),
+                      return FutureBuilder<String>(
+                        future: _souvenirCardAnimationFuture,
+                        builder: (context, animationSnapshot) {
+                          if (!animationSnapshot.hasData)
+                            return const Center(
+                              child: CircularProgressIndicator(),
+                            );
+                          final cardAnimation = animationSnapshot.data!;
+
+                          return FutureBuilder<String>(
+                            future: _souvenirCardColorFuture,
+                            builder: (context, colorSnapshot) {
+                              if (!colorSnapshot.hasData)
+                                return const Center(
+                                  child: CircularProgressIndicator(),
+                                );
+                              final globalCardColor = colorSnapshot.data!;
+
+                              return FutureBuilder<bool>(
+                                future: _forceGlobalSouvenirColorFuture,
+                                builder: (context, forceSnapshot) {
+                                  if (!forceSnapshot.hasData)
+                                    return const Center(
+                                      child: CircularProgressIndicator(),
+                                    );
+                                  final forceGlobal = forceSnapshot.data!;
+
+                                  final sortedSouvenirs = List<
+                                    SouvenirModel
+                                  >.from(_displayedSouvenirs)..sort((a, b) {
+                                    final zA = _souvenirZOrders[a.id] ?? 0.0;
+                                    final zB = _souvenirZOrders[b.id] ?? 0.0;
+                                    return zA.compareTo(zB);
+                                  });
+
+                                  return Stack(
+                                    children:
+                                        sortedSouvenirs.map((souvenir) {
+                                          final actualColor =
+                                              (forceGlobal ||
+                                                      souvenir.cardColor ==
+                                                          null)
+                                                  ? globalCardColor
+                                                  : souvenir.cardColor!;
+                                          return MovingContentCard(
+                                            key: ValueKey(souvenir.id),
+                                            data: souvenir,
+                                            design: cardDesign,
+                                            color: actualColor,
+                                            animationType: cardAnimation,
+                                            size: cardSize,
+                                            onSendToBack:
+                                                () => _sendSouvenirToBack(
+                                                  souvenir,
+                                                ),
+                                            onReplaceRequest:
+                                                () =>
+                                                    _replaceSouvenir(souvenir),
+                                            parentConstraints: constraints,
+                                            contentBuilder:
+                                                (ctx, data) =>
+                                                    _buildSouvenirCardContent(
+                                                      data as SouvenirModel,
+                                                    ),
+                                            onLongPress: () {},
+                                            onTap:
+                                                () => _showSouvenirDetailDialog(
+                                                  souvenir,
+                                                ),
+                                          );
+                                        }).toList(),
+                                  );
+                                },
+                              );
+                            },
+                          );
+                        },
+                      );
+                    },
+                  );
+                },
+              )
+            else
+              _buildEmptyMessage("Vous n'avez aucun souvenir pour le moment."),
+
             Positioned(
               top: 12,
               right: 12,
               child: IconButton(
                 icon: Icon(
                   Icons.filter_list,
-                  color: appBrightnessNotifier.value == Brightness.dark
-                      ? Colors.white
-                      : Colors.blue.shade700,
+                  color:
+                      appBrightnessNotifier.value == Brightness.dark
+                          ? Colors.white
+                          : Colors.blue.shade700,
                 ),
-                onPressed: () =>
-                    _showSouvenirFilterDialog(souvenirFilterNotifier),
+                onPressed:
+                    () => _showSouvenirFilterDialog(souvenirFilterNotifier),
               ),
             ),
           ],
@@ -3704,26 +5541,272 @@ class HomePageState extends State<HomePage>
       },
     );
   }
+
+  // Code corrigé
+  String _getImagePath(String design, String color) {
+    final safeDesign = design.isNotEmpty ? design : 'carrer';
+    final safeColor = color.isNotEmpty ? color : 'bleu';
+    // Correction : Ajoutez le chemin complet du dossier 'assets/'.
+    return 'assets/${safeDesign}_${safeColor}.png';
+  }
+
+  // NOUVEAU : Widget pour construire le contenu d'une carte Journée
+  Widget _buildJourneeCardContent(JourneeModel journee) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Column(
+                mainAxisSize: MainAxisSize.min, // Important pour le FittedBox
+                children: [
+                  if (journee.emoji != null)
+                    Text(journee.emoji!, style: const TextStyle(fontSize: 28)),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width:
+                        150, // Permet le retour à la ligne avant le scaleDown
+                    child: Text(
+                      journee.texte1 ?? 'Aucune description',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: Colors.black87,
+                        fontWeight: FontWeight.w600,
+                        height: 1.3,
+                      ),
+                      maxLines: 4,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  if (journee.note != null)
+                    Text(
+                      'Note: ${journee.note}',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.blueGrey,
+                        fontSize: 12,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // NOUVEAU : Widget pour construire le contenu d'une carte Souvenir
+  Widget _buildSouvenirCardContent(SouvenirModel souvenir) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: 150,
+                    child: Text(
+                      souvenir.texte,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        height: 1.3,
+                        color: Colors.black87,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 4,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _getQualiteColor(
+                        souvenir.qualite,
+                      ).withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      _getQualiteLabel(souvenir.qualite),
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: _getQualiteColor(souvenir.qualite),
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildFriendsJourneesTab(bool hasPostedToday) {
-    return _buildJourneeList(_friendsJournees, 'Journées de mes amis', showRepublishButton: true, hasUserPostedToday: hasPostedToday);
+    return _buildJourneeList(
+      _friendsJournees,
+      'Journées de mes amis',
+      showRepublishButton: true,
+      hasUserPostedToday: hasPostedToday,
+    );
   }
 
+  // --- WIDGET POUR L'ONGLET MONDIAL (MODIFIÉ) ---
   Widget _buildGlobalJourneesTab(bool hasPostedToday) {
-    return _buildJourneeList(_globalJournees, 'Journées mondiales', showRepublishButton: true, hasUserPostedToday: hasPostedToday);
+    if (_isLoadingGlobalPrefs) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    return Column(
+      children: [
+        // Barre de contrôle compacte — visible uniquement quand le partage est actif
+        if (_shareInGlobalFeed)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            color: Theme.of(context).scaffoldBackgroundColor,
+            child: Row(
+              children: [
+                ActionChip(
+                  label: Text(
+                    'Mon Pays',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: _globalFilter == 'mon_pays' ? Colors.white : null,
+                    ),
+                  ),
+                  backgroundColor:
+                      _globalFilter == 'mon_pays' ? Colors.blue : null,
+                  onPressed: () => _onGlobalFilterChanged('mon_pays'),
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 2),
+                ),
+                const SizedBox(width: 6),
+                ActionChip(
+                  label: Text(
+                    'Tous les Pays',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color:
+                          _globalFilter == 'tous_les_pays'
+                              ? Colors.white
+                              : null,
+                    ),
+                  ),
+                  backgroundColor:
+                      _globalFilter == 'tous_les_pays' ? Colors.blue : null,
+                  onPressed: () => _onGlobalFilterChanged('tous_les_pays'),
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 2),
+                ),
+                const Spacer(),
+                TextButton.icon(
+                  onPressed: () => _toggleGlobalSharing(false),
+                  icon: const Icon(Icons.visibility_off, size: 13),
+                  label: const Text(
+                    'Désactiver',
+                    style: TextStyle(fontSize: 11),
+                  ),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.grey,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        const Divider(height: 1),
+        Expanded(
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              _buildJourneeList(
+                _globalJournees,
+                'Journées mondiales',
+                showRepublishButton: true,
+                hasUserPostedToday: hasPostedToday,
+              ),
+              // Overlay flou + switch d'activation — clippé pour ne pas déborder sur la barre du haut
+              if (!_shareInGlobalFeed)
+                ClipRect(
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 6.0, sigmaY: 6.0),
+                    child: Container(
+                      color: Colors.black.withValues(alpha: 0.15),
+                      alignment: Alignment.center,
+                      child: Card(
+                        elevation: 8,
+                        margin: const EdgeInsets.symmetric(horizontal: 32),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 20,
+                            vertical: 20,
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.public,
+                                size: 40,
+                                color: Colors.blue,
+                              ),
+                              const SizedBox(height: 12),
+                              const Text(
+                                'Activez le partage pour voir les journées du monde entier.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              SwitchListTile(
+                                title: const Text('Partager ma journée'),
+                                value: _shareInGlobalFeed,
+                                onChanged: _toggleGlobalSharing,
+                                activeColor: Colors.blue,
+                                secondary: const Icon(Icons.visibility),
+                                dense: true,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
   }
 
-
-  Future<String> _getCardDesignFromPreferences() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    return prefs.getString('cardDesign') ?? 'default';
-  }
-
-  Future<String> _getJourneeCardDesignFromPreferences() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    return prefs.getString('journeeCardDesign') ?? 'default';
-  }
-
-  List<SouvenirModel> _filterSouvenirs(List<SouvenirModel> souvenirs, String filter) {
+  List<SouvenirModel> _filterSouvenirs(
+    List<SouvenirModel> souvenirs,
+    String filter,
+  ) {
     return souvenirs.where((souvenir) {
       switch (filter) {
         case 'public':
@@ -3747,7 +5830,10 @@ class HomePageState extends State<HomePage>
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: const Text('Filtrer les souvenirs', style: TextStyle(color: Colors.blue)),
+          title: const Text(
+            'Filtrer les souvenirs',
+            style: TextStyle(color: Colors.blue),
+          ),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -3756,9 +5842,17 @@ class HomePageState extends State<HomePage>
                 _buildFilterRadioListTile(filterNotifier, 'public', 'Public'),
                 _buildFilterRadioListTile(filterNotifier, 'prive', 'Privé'),
                 const Divider(),
-                _buildFilterRadioListTile(filterNotifier, 'nostalgie', 'Nostalgie'),
+                _buildFilterRadioListTile(
+                  filterNotifier,
+                  'nostalgie',
+                  'Nostalgie',
+                ),
                 _buildFilterRadioListTile(filterNotifier, 'bonheur', 'Bonheur'),
-                _buildFilterRadioListTile(filterNotifier, 'jamais_oublie', 'Jamais oublié'),
+                _buildFilterRadioListTile(
+                  filterNotifier,
+                  'jamais_oublie',
+                  'Jamais oublié',
+                ),
               ],
             ),
           ),
@@ -3773,7 +5867,11 @@ class HomePageState extends State<HomePage>
     );
   }
 
-  Widget _buildFilterRadioListTile(ValueNotifier<String> filterNotifier, String value, String title) {
+  Widget _buildFilterRadioListTile(
+    ValueNotifier<String> filterNotifier,
+    String value,
+    String title,
+  ) {
     return ValueListenableBuilder<String>(
       valueListenable: filterNotifier,
       builder: (context, currentFilter, child) {
@@ -3798,23 +5896,27 @@ class HomePageState extends State<HomePage>
     if (currentUser == null) return 0;
 
     try {
-      final journeesSnapshot = await FirebaseFirestore.instance
-          .collection('journees')
-          .where('userId', isEqualTo: currentUser.uid)
-          .get();
+      final journeesSnapshot =
+          await FirebaseFirestore.instance
+              .collection('journees')
+              .where('userId', isEqualTo: currentUser.uid)
+              .get();
 
-      final souvenirsSnapshot = await FirebaseFirestore.instance
-          .collection('souvenirs')
-          .where('userId', isEqualTo: currentUser.uid)
-          .get();
+      final souvenirsSnapshot =
+          await FirebaseFirestore.instance
+              .collection('souvenirs')
+              .where('userId', isEqualTo: currentUser.uid)
+              .get();
 
-      final journeesDates = journeesSnapshot.docs
-          .map((doc) => (doc['date'] as Timestamp).toDate())
-          .toList();
+      final journeesDates =
+          journeesSnapshot.docs
+              .map((doc) => (doc['date'] as Timestamp).toDate())
+              .toList();
 
-      final souvenirsDates = souvenirsSnapshot.docs
-          .map((doc) => (doc['date'] as Timestamp).toDate())
-          .toList();
+      final souvenirsDates =
+          souvenirsSnapshot.docs
+              .map((doc) => (doc['date'] as Timestamp).toDate())
+              .toList();
 
       final Set<DateTime> uniquePostDates = {};
 
@@ -3833,21 +5935,23 @@ class HomePageState extends State<HomePage>
         return 0;
       }
 
-      final int totalDaysSinceRegistration = DateTime.now().difference(creationDate.toLocal()).inDays + 1;
+      final int totalDaysSinceRegistration =
+          DateTime.now().difference(creationDate.toLocal()).inDays + 1;
 
       if (totalDaysSinceRegistration <= 0) {
         return activeDaysCount > 0 ? 100 : 0;
       }
 
-      final double reliabilityPercentage = (activeDaysCount / totalDaysSinceRegistration) * 100;
+      final double reliabilityPercentage =
+          (activeDaysCount / totalDaysSinceRegistration) * 100;
 
       return reliabilityPercentage.clamp(0, 100).round();
-
     } catch (e) {
       print('Erreur lors du calcul du pourcentage de fiabilité : $e');
       return 0;
     }
   }
+
   Future<void> _showNiveauDeVieDialog() async {
     User? currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) return;
@@ -3855,50 +5959,76 @@ class HomePageState extends State<HomePage>
     try {
       final userSubscriptionData = await getUserSubscriptionData();
       final isVip = userSubscriptionData['isVip'];
-      final lastIaUpdateTimestamp = userSubscriptionData['lastIaUpdate'] as Timestamp?;
+      final lastIaUpdateTimestamp =
+          userSubscriptionData['lastIaUpdate'] as Timestamp?;
       final lastIaUpdate = lastIaUpdateTimestamp?.toDate();
 
-      DocumentSnapshot userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(currentUser.uid)
-          .get();
+      DocumentSnapshot userDoc =
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(currentUser.uid)
+              .get();
 
       Map<String, dynamic> userData = userDoc.data() as Map<String, dynamic>;
 
       bool isIAAnalysisActive = userData['isIAAnalysisActive'] ?? false;
-      bool isTruthAdjustmentActive = userData['isTruthAdjustmentActive'] ?? false;
+      bool isTruthAdjustmentActive =
+          userData['isTruthAdjustmentActive'] ?? false;
+
       int truthPercentage = await _calculateTruthPercentage();
+      debugPrint(
+        '[FIDELITE] Pourcentage de fiabilité calculé : $truthPercentage%',
+      );
+
       int qualiteDeVieActuelle = userData['qualiteDeVieActuelle'] ?? 50;
 
       int adjustNoteWithTruth(int note, int truthPercentage) {
-        return (note * truthPercentage / 100).round();
+        int adjusted = (note * truthPercentage / 100).round();
+        debugPrint(
+          '[FIDELITE] Ajustement -> Note de base: $note, Fiabilité: $truthPercentage%, Résultat: $adjusted',
+        );
+        return adjusted;
       }
 
-
       Future<Map<String, dynamic>> analyseEmotionsEtSouvenirsParIA() async {
-        final url = Uri.parse('https://api.deepseek.com/v1/chat/completions');
-        if (currentUser == null) return {'qualiteDeVie': 50, 'analyse': 'Utilisateur non trouvé.', 'recommandations': []};
+        final url = Uri.parse(
+          'https://api.deepinfra.com/v1/openai/chat/completions',
+        );
+        if (currentUser == null)
+          return {
+            'qualiteDeVie': 50,
+            'analyse': 'Utilisateur non trouvé.',
+            'recommandations': [],
+          };
 
-        DocumentSnapshot userDoc = await _firestore.collection('users').doc(currentUser.uid).get();
+        DocumentSnapshot userDoc =
+            await _firestore.collection('users').doc(currentUser.uid).get();
         if (!userDoc.exists) {
-          return {'qualiteDeVie': 50, 'analyse': 'Profil utilisateur non trouvé.', 'recommandations': []};
+          return {
+            'qualiteDeVie': 50,
+            'analyse': 'Profil utilisateur non trouvé.',
+            'recommandations': [],
+          };
         }
+
         Map<String, dynamic> userData = userDoc.data() as Map<String, dynamic>;
         List<Map<String, dynamic>> newLifeEvents = [];
         List<DocumentReference> elementsToUpdateRefs = [];
 
-        final categoriesSnapshot = await _firestore
-            .collection('users')
-            .doc(currentUser.uid)
-            .collection('categories_elements')
-            .get();
+        final categoriesSnapshot =
+            await _firestore
+                .collection('users')
+                .doc(currentUser.uid)
+                .collection('categories_elements')
+                .get();
 
         for (final categoryDoc in categoriesSnapshot.docs) {
           final categoryName = categoryDoc.data()['nom'] ?? 'Inconnue';
-          final elementsSnapshot = await categoryDoc.reference
-              .collection('elements')
-              .where('lastAnalyzed', isEqualTo: null)
-              .get();
+          final elementsSnapshot =
+              await categoryDoc.reference
+                  .collection('elements')
+                  .where('lastAnalyzed', isEqualTo: null)
+                  .get();
 
           for (final elementDoc in elementsSnapshot.docs) {
             final elementData = elementDoc.data();
@@ -3906,23 +6036,36 @@ class HomePageState extends State<HomePage>
               'category': categoryName,
               'text': elementData['texte'],
               'explanation': elementData['explication'],
-              'date': (elementData['date'] as Timestamp).toDate().toIso8601String(),
+              'date':
+                  (elementData['date'] as Timestamp).toDate().toIso8601String(),
             });
             elementsToUpdateRefs.add(elementDoc.reference);
           }
         }
+
         if (newLifeEvents.isEmpty) {
           return {
             'qualiteDeVie': userData['iaQualiteDeVie'] ?? 50,
-            'analyse': "Tous les éléments ont déjà été analysés. Votre note de vie reste inchangée.",
-            'recommandations': userData['iaRecommendations'] ?? []
+            'analyse':
+                "Tous les éléments ont déjà été analysés. Votre note de vie reste inchangée.",
+            'recommandations': userData['iaRecommendations'] ?? [],
           };
         }
+
         int previousQualityOfLife = userData['iaQualiteDeVie'] ?? 50;
         final memoriesData = {
-          "Jamais Oublié": {"count": userData['jamaisOublieCount'] ?? 0, "averageNote": userData['jamaisOublieNote'] ?? 50},
-          "Bonheur": {"count": userData['bonheurCount'] ?? 0, "averageNote": userData['bonheurNote'] ?? 50},
-          "Nostalgie": {"count": userData['nostalgieCount'] ?? 0, "averageNote": userData['nostalgieNote'] ?? 50},
+          "Jamais Oublié": {
+            "count": userData['jamaisOublieCount'] ?? 0,
+            "averageNote": userData['jamaisOublieNote'] ?? 50,
+          },
+          "Bonheur": {
+            "count": userData['bonheurCount'] ?? 0,
+            "averageNote": userData['bonheurNote'] ?? 50,
+          },
+          "Nostalgie": {
+            "count": userData['nostalgieCount'] ?? 0,
+            "averageNote": userData['nostalgieNote'] ?? 50,
+          },
         };
 
         try {
@@ -3933,44 +6076,77 @@ class HomePageState extends State<HomePage>
               'Authorization': 'Bearer $DEEPSEEK_API_KEY',
             },
             body: jsonEncode({
-              'model': 'deepseek-chat',
+              'model': await resolveAiModel(isVip: _isVip),
               'max_tokens': 800,
               'messages': [
                 {
                   'role': 'user',
                   'content': '''
                       Tu es un psychologue. Mets à jour la note de qualité de vie d'un utilisateur en te basant sur de NOUVEAUX événements.
-
                       Contexte :
                       1. Qualité de vie PRÉCÉDENTE : $previousQualityOfLife/100.
-                      2. Souvenirs déjà connus : ${jsonEncode(memoriesData)}.
-                      3. NOUVEAUX événements à analyser : ${jsonEncode(newLifeEvents)}.
-
+                      2. Souvenirs : ${jsonEncode(memoriesData)}.
+                      3. NOUVEAUX événements : ${jsonEncode(newLifeEvents)}.
                       Instructions :
-                      - Analyse l'impact des NOUVEAUX événements.
-                      - Ajuste la qualité de vie PRÉCÉDENTE pour calculer une NOUVELLE note.
-                      - Rédige une analyse concise expliquant l'évolution.
-                      - Propose 2 recommandations concrètes basées sur les nouveaux événements.
-
+                      - Ajuste la qualité de vie PRÉCÉDENTE.
+                      - Rédige une analyse concise.
+                      - Propose 2 recommandations.
                       Réponds UNIQUEMENT au format JSON EXACT :
                       {
                         "qualiteDeVie": 0-100,
-                        "analyse": "Texte d'analyse.",
-                        "recommandations": ["Recommandation 1", "Recommandation 2"]
+                        "analyse": "Texte.",
+                        "recommandations": ["Rec 1", "Rec 2"]
                       }
-                      '''
-                }
-              ]
+                      ''',
+                },
+              ],
             }),
           );
 
           if (response.statusCode == 200) {
             final data = jsonDecode(utf8.decode(response.bodyBytes));
-            final content = data['choices'][0]['message']['content'];
-            final jsonMatch = RegExp(r'\{[\s\S]*\}').firstMatch(content);
-            if (jsonMatch != null) {
-              final parsedJson = jsonDecode(jsonMatch.group(0)!);
-              final int qualiteDeVieCalculee = parsedJson['qualiteDeVie'] is int ? parsedJson['qualiteDeVie'] : int.tryParse(parsedJson['qualiteDeVie'].toString()) ?? previousQualityOfLife;
+            final content = data['choices'][0]['message']['content'] as String;
+
+            Map<String, dynamic>? parsedJson;
+            try {
+              final codeBlockMatch = RegExp(
+                r'```(?:json)?\s*'
+                r'([\s\S]*?)'
+                r'\s*```',
+              ).firstMatch(content);
+              if (codeBlockMatch != null) {
+                final block = codeBlockMatch.group(1)!.trim();
+                parsedJson = jsonDecode(block) as Map<String, dynamic>;
+              }
+            } catch (_) {}
+
+            if (parsedJson == null) {
+              final jsonMatch = RegExp(
+                r'\{[\s\S]*\}',
+                dotAll: true,
+              ).firstMatch(content);
+              if (jsonMatch != null) {
+                try {
+                  parsedJson =
+                      jsonDecode(jsonMatch.group(0)!) as Map<String, dynamic>;
+                } catch (_) {
+                  try {
+                    final sanitized = jsonMatch
+                        .group(0)!
+                        .replaceAllMapped(RegExp(r'[\x00-\x1F]'), (m) => ' ');
+                    parsedJson = jsonDecode(sanitized) as Map<String, dynamic>;
+                  } catch (_) {}
+                }
+              }
+            }
+
+            if (parsedJson != null) {
+              final int qualiteDeVieCalculee =
+                  parsedJson['qualiteDeVie'] is int
+                      ? parsedJson['qualiteDeVie']
+                      : int.tryParse(parsedJson['qualiteDeVie'].toString()) ??
+                          previousQualityOfLife;
+
               WriteBatch batch = _firestore.batch();
               for (final docRef in elementsToUpdateRefs) {
                 batch.update(docRef, {'lastAnalyzed': Timestamp.now()});
@@ -3980,259 +6156,516 @@ class HomePageState extends State<HomePage>
               return {
                 'qualiteDeVie': qualiteDeVieCalculee,
                 'analyse': parsedJson['analyse'] ?? 'Analyse non disponible.',
-                'recommandations': List<String>.from(parsedJson['recommandations'] ?? [])
+                'recommandations': List<String>.from(
+                  parsedJson['recommandations'] ?? [],
+                ),
               };
             }
           }
-          return {'qualiteDeVie': previousQualityOfLife, 'analyse': 'Impossible de générer une analyse complète.', 'recommandations': []};
+          return {
+            'qualiteDeVie': previousQualityOfLife,
+            'analyse': 'Impossible de générer une analyse complète.',
+            'recommandations': [],
+          };
         } catch (e) {
-          return {'qualiteDeVie': previousQualityOfLife, 'analyse': 'Erreur de connexion à l\'IA.', 'recommandations': []};
+          throw Exception('Erreur de connexion à l\'IA : $e');
         }
       }
 
       showDialog(
         context: context,
         builder: (BuildContext context) {
+          final isDark = Theme.of(context).brightness == Brightness.dark;
+          final bgColor = isDark ? Colors.grey[900] : Colors.white;
+          final textColor = isDark ? Colors.white : Colors.black87;
+
           return StatefulBuilder(
             builder: (context, setStateDialog) {
               bool isUpdatingIA = false;
-
               bool canUpdateIA = false;
               int remainingDays = 0;
+
               if (isVip) {
                 canUpdateIA = true;
               } else {
                 if (lastIaUpdate == null) {
                   canUpdateIA = true;
                 } else {
-                  remainingDays = 7 - DateTime.now().difference(lastIaUpdate).inDays;
+                  remainingDays =
+                      7 - DateTime.now().difference(lastIaUpdate).inDays;
                   canUpdateIA = remainingDays <= 0;
                 }
               }
 
               int calculateDisplayQualiteDeVie() {
-                if (!isIAAnalysisActive) {
-                  return isTruthAdjustmentActive
-                      ? adjustNoteWithTruth(qualiteDeVieActuelle, truthPercentage)
-                      : qualiteDeVieActuelle;
-                } else {
-                  return isTruthAdjustmentActive
-                      ? adjustNoteWithTruth(userData['iaQualiteDeVie'] ?? qualiteDeVieActuelle, truthPercentage)
-                      : userData['iaQualiteDeVie'] ?? qualiteDeVieActuelle;
-                }
+                int baseNote =
+                    isIAAnalysisActive
+                        ? (userData['iaQualiteDeVie'] ?? qualiteDeVieActuelle)
+                        : qualiteDeVieActuelle;
+                int finalNote =
+                    isTruthAdjustmentActive
+                        ? adjustNoteWithTruth(baseNote, truthPercentage)
+                        : baseNote;
+
+                debugPrint(
+                  '[FIDELITE] UI MAJ -> Note de base (IA=$isIAAnalysisActive): $baseNote | Fidélité Active: $isTruthAdjustmentActive | Note Finale Affichée: $finalNote',
+                );
+                return finalNote;
               }
 
               int displayQualiteDeVie = calculateDisplayQualiteDeVie();
-              String displayAnalyse = isIAAnalysisActive
-                  ? (userData['iaAnalyse'] ?? 'Analyse IA non disponible')
-                  : _getQualiteDeVieMessage(displayQualiteDeVie);
-              List<String> recommandations = isIAAnalysisActive
-                  ? List<String>.from(userData['iaRecommendations'] ?? [])
-                  : [];
+              String displayAnalyse =
+                  isIAAnalysisActive
+                      ? (userData['iaAnalyse'] ?? 'Analyse IA non disponible')
+                      : _getQualiteDeVieMessage(displayQualiteDeVie);
+              List<String> recommandations =
+                  isIAAnalysisActive
+                      ? List<String>.from(userData['iaRecommendations'] ?? [])
+                      : [];
 
               Color couleur = _getQualiteDeVieColor(displayQualiteDeVie);
-              String message = isIAAnalysisActive ? "Analyse IA de votre qualité de vie" : displayAnalyse;
 
-              return AlertDialog(
-                title: const Text(
-                  'Votre Niveau de Vie',
-                  style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue),
-                ),
-                content: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      LinearProgressIndicator(
-                        value: displayQualiteDeVie / 100,
-                        backgroundColor: Colors.grey.shade300,
-                        valueColor: AlwaysStoppedAnimation<Color>(couleur),
-                        minHeight: 12,
+              return Dialog(
+                backgroundColor: Colors.transparent,
+                insetPadding: const EdgeInsets.all(20),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    color: bgColor,
+                    borderRadius: BorderRadius.circular(28),
+                    boxShadow: [
+                      BoxShadow(
+                        color: couleur.withOpacity(0.2),
+                        blurRadius: 20,
+                        spreadRadius: 2,
                       ),
-                      const SizedBox(height: 16),
-                      Text(
-                        '$displayQualiteDeVie/100',
-                        style: TextStyle(
-                          fontSize: 28,
-                          fontWeight: FontWeight.bold,
-                          color: couleur,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Fiabilité de vos données : $truthPercentage%',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.blue.shade700,
-                        ),
-                      ),
-                      if (isIAAnalysisActive)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 16.0),
-                          child: Text(
-                            displayAnalyse,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontStyle: FontStyle.italic,
-                              color: Colors.blue.shade700,
-                              fontSize: 14,
+                    ],
+                  ),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // --- EN-TÊTE ---
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Icon(Icons.favorite, color: couleur, size: 32),
+                            IconButton(
+                              icon: Icon(
+                                Icons.close,
+                                color: Colors.grey.shade500,
+                              ),
+                              onPressed: () => Navigator.of(context).pop(),
                             ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Votre Qualité de Vie',
+                          style: TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w800,
+                            color: textColor,
                           ),
                         ),
-                      if (recommandations.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 16.0),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Recommandations :',
-                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blue),
+                        const SizedBox(height: 24),
+
+                        // --- BARRE DE PROGRESSION & SCORE ---
+                        Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            SizedBox(
+                              height: 120,
+                              width: 120,
+                              child: CircularProgressIndicator(
+                                value: displayQualiteDeVie / 100,
+                                backgroundColor:
+                                    isDark
+                                        ? Colors.grey[800]
+                                        : Colors.grey.shade200,
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  couleur,
+                                ),
+                                strokeWidth: 12,
+                                strokeCap: StrokeCap.round,
                               ),
-                              const SizedBox(height: 8),
-                              ...recommandations.map((rec) => Padding(
-                                padding: const EdgeInsets.only(bottom: 4.0),
-                                child: Text('• $rec', style: const TextStyle(fontSize: 14, color: Colors.black87)),
-                              )).toList(),
+                            ),
+                            Column(
+                              children: [
+                                Text(
+                                  '$displayQualiteDeVie',
+                                  style: TextStyle(
+                                    fontSize: 36,
+                                    fontWeight: FontWeight.w900,
+                                    color: couleur,
+                                    height: 1.0,
+                                  ),
+                                ),
+                                Text(
+                                  '/100',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    color: Colors.grey.shade500,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 24),
+
+                        // --- FIABILITÉ ---
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                          decoration: BoxDecoration(
+                            color:
+                                isDark
+                                    ? Colors.grey[800]
+                                    : Colors.grey.shade100,
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.verified_user_rounded,
+                                color: Colors.blue.shade600,
+                                size: 20,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Fiabilité des données : $truthPercentage%',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: textColor,
+                                ),
+                              ),
                             ],
                           ),
                         ),
-                    ],
+                        const SizedBox(height: 20),
+
+                        // --- ANALYSE IA ---
+                        if (isIAAnalysisActive)
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: couleur.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: couleur.withOpacity(0.3),
+                              ),
+                            ),
+                            child: Text(
+                              displayAnalyse,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontStyle: FontStyle.italic,
+                                color: textColor,
+                                fontSize: 14,
+                                height: 1.4,
+                              ),
+                            ),
+                          ),
+
+                        // --- RECOMMANDATIONS ---
+                        if (recommandations.isNotEmpty) ...[
+                          const SizedBox(height: 20),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              'Recommandations',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                                color: textColor,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          ...recommandations
+                              .map(
+                                (rec) => Padding(
+                                  padding: const EdgeInsets.only(bottom: 8.0),
+                                  child: Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Icon(
+                                        Icons.check_circle,
+                                        color: couleur,
+                                        size: 20,
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Text(
+                                          rec,
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            color: textColor,
+                                            height: 1.4,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                        ],
+
+                        const SizedBox(height: 32),
+
+                        // --- BOUTON DE MISE À JOUR IA ---
+                        if (isIAAnalysisActive)
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton(
+                              onPressed:
+                                  (isUpdatingIA || !canUpdateIA)
+                                      ? null
+                                      : () async {
+                                        setStateDialog(
+                                          () => isUpdatingIA = true,
+                                        );
+                                        try {
+                                          final resultIA =
+                                              await analyseEmotionsEtSouvenirsParIA();
+                                          await FirebaseFirestore.instance
+                                              .collection('users')
+                                              .doc(currentUser.uid)
+                                              .update({
+                                                'iaQualiteDeVie':
+                                                    resultIA['qualiteDeVie'],
+                                                'iaAnalyse':
+                                                    resultIA['analyse'],
+                                                'iaRecommendations':
+                                                    resultIA['recommandations'],
+                                                if (!isVip)
+                                                  'lastIaAnalysisUpdate':
+                                                      FieldValue.serverTimestamp(),
+                                              });
+
+                                          setStateDialog(() {
+                                            userData['iaQualiteDeVie'] =
+                                                resultIA['qualiteDeVie'];
+                                            userData['iaAnalyse'] =
+                                                resultIA['analyse'];
+                                            userData['iaRecommendations'] =
+                                                resultIA['recommandations'];
+                                          });
+                                        } catch (e) {
+                                          if (context.mounted)
+                                            ScaffoldMessenger.of(
+                                              context,
+                                            ).showSnackBar(
+                                              SnackBar(
+                                                content: Text('Erreur: $e'),
+                                              ),
+                                            );
+                                        } finally {
+                                          if (context.mounted)
+                                            setStateDialog(
+                                              () => isUpdatingIA = false,
+                                            );
+                                        }
+                                      },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: couleur,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 16,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                elevation: 0,
+                              ),
+                              child:
+                                  isUpdatingIA
+                                      ? const SizedBox(
+                                        height: 20,
+                                        width: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Colors.white,
+                                        ),
+                                      )
+                                      : Text(
+                                        !canUpdateIA
+                                            ? "Disponible dans $remainingDays jour(s)"
+                                            : "Mettre à jour l'analyse",
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 16,
+                                        ),
+                                      ),
+                            ),
+                          ),
+
+                        const SizedBox(height: 16),
+
+                        // --- TOGGLES OPTIONS (Fidélité & IA) ---
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton(
+                                onPressed: () async {
+                                  setStateDialog(
+                                    () =>
+                                        isTruthAdjustmentActive =
+                                            !isTruthAdjustmentActive,
+                                  );
+                                  debugPrint(
+                                    '[FIDELITE] Clic sur le bouton Fidélité. Nouvel état dans la base de données : $isTruthAdjustmentActive',
+                                  );
+                                  await FirebaseFirestore.instance
+                                      .collection('users')
+                                      .doc(currentUser.uid)
+                                      .update({
+                                        'isTruthAdjustmentActive':
+                                            isTruthAdjustmentActive,
+                                      });
+                                },
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 12,
+                                  ),
+                                  side: BorderSide(
+                                    color:
+                                        isTruthAdjustmentActive
+                                            ? Colors.blue
+                                            : Colors.grey.shade300,
+                                    width: 2,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  backgroundColor:
+                                      isTruthAdjustmentActive
+                                          ? Colors.blue.withOpacity(0.1)
+                                          : Colors.transparent,
+                                ),
+                                child: Text(
+                                  isTruthAdjustmentActive
+                                      ? 'Fidélité ON'
+                                      : 'Fidélité OFF',
+                                  style: TextStyle(
+                                    color:
+                                        isTruthAdjustmentActive
+                                            ? Colors.blue
+                                            : Colors.grey.shade600,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: OutlinedButton(
+                                onPressed: () async {
+                                  if (!isIAAnalysisActive) {
+                                    showDialog(
+                                      context: context,
+                                      barrierDismissible: false,
+                                      builder:
+                                          (context) => const Center(
+                                            child: CircularProgressIndicator(),
+                                          ),
+                                    );
+                                    try {
+                                      final resultIA =
+                                          await analyseEmotionsEtSouvenirsParIA();
+                                      await FirebaseFirestore.instance
+                                          .collection('users')
+                                          .doc(currentUser.uid)
+                                          .update({
+                                            'iaQualiteDeVie':
+                                                resultIA['qualiteDeVie'],
+                                            'iaAnalyse': resultIA['analyse'],
+                                            'iaRecommendations':
+                                                resultIA['recommandations'],
+                                            'isIAAnalysisActive': true,
+                                          });
+                                      setStateDialog(() {
+                                        isIAAnalysisActive = true;
+                                        userData['iaQualiteDeVie'] =
+                                            resultIA['qualiteDeVie'];
+                                        userData['iaAnalyse'] =
+                                            resultIA['analyse'];
+                                        userData['iaRecommendations'] =
+                                            resultIA['recommandations'];
+                                      });
+                                    } catch (e) {
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            'Une erreur est survenue: $e',
+                                          ),
+                                        ),
+                                      );
+                                    } finally {
+                                      Navigator.of(
+                                        context,
+                                      ).pop(); // Enlève le loader
+                                    }
+                                  } else {
+                                    setStateDialog(
+                                      () => isIAAnalysisActive = false,
+                                    );
+                                    await FirebaseFirestore.instance
+                                        .collection('users')
+                                        .doc(currentUser.uid)
+                                        .update({'isIAAnalysisActive': false});
+                                  }
+                                },
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 12,
+                                  ),
+                                  side: BorderSide(
+                                    color:
+                                        isIAAnalysisActive
+                                            ? Colors.deepPurple
+                                            : Colors.grey.shade300,
+                                    width: 2,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  backgroundColor:
+                                      isIAAnalysisActive
+                                          ? Colors.deepPurple.withOpacity(0.1)
+                                          : Colors.transparent,
+                                ),
+                                child: Text(
+                                  isIAAnalysisActive ? 'IA ON' : 'IA OFF',
+                                  style: TextStyle(
+                                    color:
+                                        isIAAnalysisActive
+                                            ? Colors.deepPurple
+                                            : Colors.grey.shade600,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-                actions: <Widget>[
-                  if (isIAAnalysisActive)
-                    Tooltip(
-                      message: !canUpdateIA ? "Disponible dans $remainingDays jour(s)" : "Mettre à jour l'analyse",
-                      child: TextButton(
-                        child: isUpdatingIA
-                            ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                            : const Text('Mettre à jour'),
-                        onPressed: (isUpdatingIA || !canUpdateIA)
-                            ? null
-                            : () async {
-                          setStateDialog(() { isUpdatingIA = true; });
-                          try {
-                            final resultIA = await analyseEmotionsEtSouvenirsParIA();
-                            await FirebaseFirestore.instance
-                                .collection('users')
-                                .doc(currentUser.uid)
-                                .update({
-                              'iaQualiteDeVie': resultIA['qualiteDeVie'],
-                              'iaAnalyse': resultIA['analyse'],
-                              'iaRecommendations': resultIA['recommandations'],
-                              if (!isVip) 'lastIaAnalysisUpdate': FieldValue.serverTimestamp(),
-                            });
-
-                            setStateDialog(() {
-                              userData['iaQualiteDeVie'] = resultIA['qualiteDeVie'];
-                              userData['iaAnalyse'] = resultIA['analyse'];
-                              userData['iaRecommendations'] = resultIA['recommandations'];
-                            });
-                            Navigator.of(context).pop();
-
-                          } catch (e) {
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('Erreur: $e')),
-                              );
-                            }
-                          } finally {
-                            if (context.mounted) {
-                              setStateDialog(() { isUpdatingIA = false; });
-                            }
-                          }
-                        },
-                        style: TextButton.styleFrom(
-                          foregroundColor: Colors.green,
-                          textStyle: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    ),
-                  TextButton(
-                    child: Text(isTruthAdjustmentActive ? 'Désactiver Fidélité' : 'Activer Fidélité'),
-                    onPressed: () async {
-                      setStateDialog(() {
-                        isTruthAdjustmentActive = !isTruthAdjustmentActive;
-                      });
-
-                      await FirebaseFirestore.instance
-                          .collection('users')
-                          .doc(currentUser.uid)
-                          .update({
-                        'isTruthAdjustmentActive': isTruthAdjustmentActive,
-                      });
-                    },
-                    style: TextButton.styleFrom(
-                      foregroundColor: Colors.blue.shade700,
-                      textStyle: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                  TextButton(
-                    child: Text(isIAAnalysisActive ? 'Désactiver IA' : 'Activer IA'),
-                    onPressed: () async {
-                      if (!isIAAnalysisActive) {
-                        showDialog(
-                          context: context,
-                          barrierDismissible: false,
-                          builder: (context) => const Center(child: CircularProgressIndicator()),
-                        );
-                        try {
-                          final resultIA = await analyseEmotionsEtSouvenirsParIA();
-                          await FirebaseFirestore.instance
-                              .collection('users')
-                              .doc(currentUser.uid)
-                              .update({
-                            'iaQualiteDeVie': resultIA['qualiteDeVie'],
-                            'iaAnalyse': resultIA['analyse'],
-                            'iaRecommendations': resultIA['recommandations'],
-                            'isIAAnalysisActive': true,
-                          });
-                          setStateDialog(() {
-                            isIAAnalysisActive = true;
-                            userData['iaQualiteDeVie'] = resultIA['qualiteDeVie'];
-                            userData['iaAnalyse'] = resultIA['analyse'];
-                            userData['iaRecommendations'] = resultIA['recommandations'];
-                          });
-                        } catch (e) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Une erreur est survenue: $e')),
-                          );
-                        } finally {
-                          Navigator.of(context).pop();
-                        }
-                      } else {
-                        setStateDialog(() {
-                          isIAAnalysisActive = false;
-                        });
-                        await FirebaseFirestore.instance
-                            .collection('users')
-                            .doc(currentUser.uid)
-                            .update({
-                          'isIAAnalysisActive': false,
-                        });
-                      }
-                    },
-                    style: TextButton.styleFrom(
-                      foregroundColor: Colors.blue.shade700,
-                      textStyle: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                  TextButton(
-                    child: const Text('Fermer'),
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                    },
-                    style: TextButton.styleFrom(
-                      foregroundColor: Colors.redAccent,
-                      textStyle: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ],
               );
             },
           );
@@ -4249,7 +6682,6 @@ class HomePageState extends State<HomePage>
     }
   }
 
-
   String _getQualiteDeVieMessage(int qualiteDeVie) {
     if (qualiteDeVie < 20) {
       return "Votre qualité de vie est actuellement très basse. Il est important de prendre soin de vous, de vous entourer et de chercher du soutien.";
@@ -4265,7 +6697,7 @@ class HomePageState extends State<HomePage>
   }
 
   Color _getQualiteDeVieColor(int qualiteDeVie) {
-    if (qualiteDeVie < 20 ) {
+    if (qualiteDeVie < 20) {
       return Colors.red.shade700;
     } else if (qualiteDeVie < 50) {
       return Colors.orange.shade700;
@@ -4275,46 +6707,102 @@ class HomePageState extends State<HomePage>
       return Colors.green.shade700;
     }
   }
-  Widget _buildJourneeCard(JourneeModel journee, String title, {bool showRepublishButton = false, required bool hasUserPostedToday}) {
+
+  Widget _buildJourneeCard(
+    JourneeModel journee,
+    String title, {
+    bool showRepublishButton = false,
+    required bool hasUserPostedToday,
+  }) {
     bool isMyJournees = title == 'Mes Journées';
-    final ValueNotifier<bool> souvenirVisible = ValueNotifier<bool>(false);
     final currentUser = FirebaseAuth.instance.currentUser;
 
-    final bool isMentioned = (journee.mentionedUserIds ?? []).contains(currentUser?.uid);
-    final bool amIInHiddenList = (journee.hiddenTextFriends ?? []).contains(currentUser?.uid);
-    bool shouldBlurText = !isMyJournees && (amIInHiddenList || (!hasUserPostedToday && !isMentioned));
-
-    bool isToday = journee.date.year == _today.year &&
+    final bool isMentioned = (journee.mentionedUserIds ?? []).contains(
+      currentUser?.uid,
+    );
+    final bool journeeHasHiddenText =
+        (journee.hiddenTextFriends ?? []).isNotEmpty;
+    final bool isHiddenFromMe = (journee.hiddenTextFriends ?? []).contains(
+      currentUser?.uid,
+    );
+    bool shouldBlurText =
+        !isMyJournees && (!hasUserPostedToday && !isMentioned);
+    bool shouldShowPartialMask =
+        !isMyJournees && journeeHasHiddenText && isHiddenFromMe;
+    bool isToday =
+        journee.date.year == _today.year &&
         journee.date.month == _today.month &&
         journee.date.day == _today.day;
-
     bool isLive = journee.note == null;
     final wordCount = _countWords(journee.texte1 ?? '');
 
     return FutureBuilder<DocumentSnapshot>(
       future: _firestore.collection('users').doc(journee.userId).get(),
       builder: (context, userSnapshot) {
+        final isDark = appBrightnessNotifier.value == Brightness.dark;
         Map<String, dynamic> personalizationPreferences =
-            (userSnapshot.data?.data() as Map<String, dynamic>?)?['personalizationPreferences'] ??
-                {'journeeCardColor': 'default'};
+            (userSnapshot.data?.data()
+                as Map<String, dynamic>?)?['personalizationPreferences'] ??
+            {};
 
-        Color cardColor = Colors.blue.shade100;
-        switch (personalizationPreferences['journeeCardColor']) {
-          case 'noir': cardColor = Colors.black; break;
-          case 'bleu': cardColor = Colors.blue.shade300; break;
-          case 'rouge': cardColor = Colors.red.shade300; break;
-          case 'vert': cardColor = Colors.green.shade300; break;
-          default: cardColor = Colors.blue.shade100;
+        bool forceGlobal =
+            personalizationPreferences['forceGlobalJourneeColor'] ?? false;
+        String colorPref =
+            forceGlobal
+                ? (personalizationPreferences['journeeCardColor'] ?? 'bleu')
+                : (journee.cardColor ??
+                    personalizationPreferences['journeeCardColor'] ??
+                    'bleu');
+
+        Color cardColor;
+        switch (colorPref) {
+          case 'noir':
+            cardColor = isDark ? Colors.grey.shade900 : Colors.black87;
+            break;
+          case 'rouge':
+            cardColor = isDark ? Colors.red.shade900 : Colors.red.shade400;
+            break;
+          case 'vert':
+            cardColor = isDark ? Colors.green.shade900 : Colors.green.shade400;
+            break;
+          case 'orange':
+            cardColor =
+                isDark ? Colors.orange.shade900 : Colors.orange.shade400;
+            break;
+          case 'jaune':
+            cardColor =
+                isDark ? Colors.yellow.shade900 : Colors.yellow.shade600;
+            break;
+          case 'violet':
+            cardColor =
+                isDark ? Colors.purple.shade900 : Colors.purple.shade300;
+            break;
+          case 'rose':
+            cardColor = isDark ? Colors.pink.shade900 : Colors.pink.shade300;
+            break;
+          case 'blanc':
+            cardColor = isDark ? Colors.grey.shade300 : Colors.white;
+            break;
+          case 'bleu':
+          default:
+            cardColor = isDark ? Colors.blue.shade900 : Colors.blue.shade300;
+            break;
         }
+
+        final Color cardEndColor = isDark ? Colors.grey.shade900 : Colors.white;
+        final Color mainTextColor =
+            cardColor.computeLuminance() > 0.5 ? Colors.black87 : Colors.white;
+        final Color secondaryTextColor = mainTextColor.withOpacity(0.7);
 
         return Card(
           margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
           elevation: 8,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(22),
-            side: journee.isRepost
-                ? const BorderSide(color: Colors.grey, width: 2.0)
-                : BorderSide.none,
+            side:
+                journee.isRepost
+                    ? const BorderSide(color: Colors.grey, width: 2.0)
+                    : BorderSide.none,
           ),
           child: Container(
             decoration: BoxDecoration(
@@ -4322,25 +6810,30 @@ class HomePageState extends State<HomePage>
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [
-                  cardColor,
-                  Colors.white,
-                ],
+                colors: [cardColor, cardEndColor],
               ),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.blue.withOpacity(0.2),
-                  spreadRadius: 3,
-                  blurRadius: 12,
-                  offset: const Offset(0, 6),
+                  color: cardColor.withOpacity(
+                    0.6,
+                  ), // Flou beaucoup plus visible !
+                  spreadRadius: 4,
+                  blurRadius: 20,
+                  offset: const Offset(0, 8),
                 ),
               ],
             ),
             child: Padding(
-              padding: const EdgeInsets.all(20.0),
+              padding: const EdgeInsets.fromLTRB(
+                20.0,
+                20.0,
+                20.0,
+                10.0,
+              ), // Padding ajusté
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // 1. EN-TÊTE FIXE
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -4355,7 +6848,11 @@ class HomePageState extends State<HomePage>
                                 padding: const EdgeInsets.only(bottom: 4.0),
                                 child: Text(
                                   'De ${journee.repostedFromUserName ?? 'un ami'}',
-                                  style: const TextStyle(fontSize: 11, color: Colors.grey),
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontStyle: FontStyle.italic,
+                                    color: secondaryTextColor,
+                                  ),
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
@@ -4364,153 +6861,343 @@ class HomePageState extends State<HomePage>
                                 label: Text(
                                   journee.estPublic ? 'Public' : 'Privé',
                                   style: TextStyle(
-                                    color: journee.estPublic ? Colors.green : Colors.red,
+                                    color:
+                                        journee.estPublic
+                                            ? Colors.green
+                                            : Colors.red,
                                     fontWeight: FontWeight.bold,
                                     fontSize: 11,
                                   ),
                                 ),
-                                backgroundColor: journee.estPublic
-                                    ? Colors.green.shade50
-                                    : Colors.red.shade50,
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                                backgroundColor:
+                                    journee.estPublic
+                                        ? Colors.green.shade50
+                                        : Colors.red.shade50,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(15),
+                                ),
                               ),
                           ],
                         ),
                       ),
                       if (isMyJournees)
                         PopupMenuButton<String>(
-                          icon: const Icon(Icons.more_vert, color: Colors.blueGrey),
+                          icon: Icon(Icons.more_vert, color: mainTextColor),
                           onSelected: (value) {
-                            if (value == 'modifier') {
+                            if (value == 'modifier')
                               _modifierJournee(journee);
-                            } else if (value == 'supprimer') {
+                            else if (value == 'supprimer')
                               _supprimerJournee(journee);
-                            }
                           },
-                          itemBuilder: (BuildContext context) => [
-                            const PopupMenuItem(value: 'modifier', child: Text('Modifier')),
-                            const PopupMenuItem(value: 'supprimer', child: Text('Supprimer')),
-                          ],
+                          itemBuilder:
+                              (BuildContext context) => [
+                                const PopupMenuItem(
+                                  value: 'modifier',
+                                  child: Text('Modifier'),
+                                ),
+                                const PopupMenuItem(
+                                  value: 'supprimer',
+                                  child: Text('Supprimer'),
+                                ),
+                              ],
                         ),
                     ],
                   ),
-                  const SizedBox(height: 15),
-                  Expanded(
-                    child: SingleChildScrollView(
-                      child: shouldBlurText
-                          ? ImageFiltered(
-                        imageFilter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
-                        child: Text(
-                          journee.texte1 ?? '',
-                          style: TextStyle(
-                            fontSize: _calculateFontSize(journee.texte1 ?? ''),
-                            color: Colors.black87,
-                            height: 1.5,
-                          ),
-                        ),
-                      )
-                          : (isMyJournees
-                          ? Text(
-                        journee.texte1 ?? '',
-                        style: TextStyle(
-                          fontSize: _calculateFontSize(journee.texte1 ?? ''),
-                          color: Colors.black87,
-                          height: 1.5,
-                        ),
-                      )
-                          : _buildTextWithBlurredAsterisks(
-                        journee.texte1 ?? '',
-                        style: TextStyle(
-                          fontSize: _calculateFontSize(journee.texte1 ?? ''),
-                          color: Colors.black87,
-                          height: 1.5,
-                        ),
-                      )),
-                    ),
-                  ),
-                  if (journee.photoUrls.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      height: 80,
-                      child: ListView.builder(
-                        scrollDirection: Axis.horizontal,
-                        itemCount: journee.photoUrls.length,
-                        itemBuilder: (context, index) {
-                          final imageUrl = journee.photoUrls[index];
-                          return Padding(
-                            padding: const EdgeInsets.only(right: 8.0),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(10.0),
-                              child: Image.network(
-                                imageUrl,
-                                width: 80,
-                                height: 80,
-                                fit: BoxFit.cover,
-                                loadingBuilder: (context, child, loadingProgress) {
-                                  if (loadingProgress == null) return child;
-                                  return Container(
-                                    width: 80, height: 80, color: Colors.grey[200],
-                                    child: const Center(child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.blue))),
-                                  );
-                                },
-                                errorBuilder: (context, error, stackTrace) {
-                                  return Container(
-                                    width: 80, height: 80, color: Colors.grey[200],
-                                    child: const Icon(Icons.broken_image, color: Colors.grey, size: 40),
-                                  );
-                                },
+                  if ((title == 'Journées de mes amis' ||
+                          title == 'Journées mondiales') &&
+                      !hasUserPostedToday)
+                    Expanded(
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: SingleChildScrollView(
+                              child: Padding(
+                                padding: const EdgeInsets.only(top: 12.0),
+                                child: ImageFiltered(
+                                  imageFilter: ImageFilter.blur(
+                                    sigmaX: 6,
+                                    sigmaY: 6,
+                                  ),
+                                  child: Opacity(
+                                    opacity: 0.45,
+                                    child: Text(
+                                      journee.texte1 ?? '',
+                                      style: TextStyle(
+                                        fontSize: _calculateFontSize(
+                                          journee.texte1 ?? '',
+                                        ),
+                                        color: mainTextColor,
+                                        height: 1.5,
+                                      ),
+                                    ),
+                                  ),
+                                ),
                               ),
                             ),
-                          );
-                        },
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                  ],
-                  if (journee.commentaire != null && journee.commentaire!.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8.0),
-                      child: Text(
-                        journee.commentaire!,
-                        style: TextStyle(
-                          fontStyle: FontStyle.italic,
-                          color: Colors.grey[600],
-                          fontSize: 14,
-                        ),
-                      ),
-                    ),
-                  if (isMyJournees && isToday && isLive) ...[
-                    const SizedBox(height: 10),
-                    Center(
-                      child: ElevatedButton(
-                        onPressed: wordCount >= 4
-                            ? () {
-                          _confirmerJournee(journee);
-                        }
-                            : () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => JourneeEnDirectPage(journeeToEdit: journee),
+                          ),
+                          Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(16.0),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  border: Border.all(
+                                    color: mainTextColor.withOpacity(0.6),
+                                    width: 2,
+                                  ),
+                                  borderRadius: BorderRadius.circular(12),
+                                  color: mainTextColor.withOpacity(0.1),
+                                ),
+                                padding: const EdgeInsets.all(20),
+                                child: Text(
+                                  'Postez votre journée pour voir le contenu complet des autres utilisateurs.',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    color: mainTextColor,
+                                    fontStyle: FontStyle.italic,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
                             ),
-                          );
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: wordCount >= 4 ? Colors.green.shade600 : Colors.orange.shade600,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                          elevation: 3,
-                        ),
-                        child: Text(
-                          wordCount >= 4 ? 'Confirmer ma journée' : 'Écrivez pour confirmer',
-                          style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      ),
+                    )
+                  else
+                    const SizedBox(height: 10),
+
+                  // 2. TEXTE & IMAGES (Qui peuvent scroller si c'est trop long)
+                  if ((title == 'Journées de mes amis' ||
+                          title == 'Journées mondiales') &&
+                      !hasUserPostedToday)
+                    const SizedBox.shrink()
+                  else
+                    Expanded(
+                      child: SingleChildScrollView(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            shouldBlurText
+                                ? ImageFiltered(
+                                  imageFilter: ImageFilter.blur(
+                                    sigmaX: 5,
+                                    sigmaY: 5,
+                                  ),
+                                  child: Text(
+                                    journee.texte1 ?? '',
+                                    style: TextStyle(
+                                      fontSize: _calculateFontSize(
+                                        journee.texte1 ?? '',
+                                      ),
+                                      color: mainTextColor,
+                                      height: 1.5,
+                                    ),
+                                  ),
+                                )
+                                : isMyJournees
+                                ? Text(
+                                  journee.texte1 ?? '',
+                                  style: TextStyle(
+                                    fontSize: _calculateFontSize(
+                                      journee.texte1 ?? '',
+                                    ),
+                                    color: mainTextColor,
+                                    height: 1.5,
+                                  ),
+                                )
+                                : shouldShowPartialMask &&
+                                    !(journee.texte1Masked ?? '').contains('*')
+                                ? ImageFiltered(
+                                  imageFilter: ImageFilter.blur(
+                                    sigmaX: 5,
+                                    sigmaY: 5,
+                                  ),
+                                  child: Text(
+                                    journee.texte1 ?? '',
+                                    style: TextStyle(
+                                      fontSize: _calculateFontSize(
+                                        journee.texte1 ?? '',
+                                      ),
+                                      color: mainTextColor,
+                                      height: 1.5,
+                                    ),
+                                  ),
+                                )
+                                : _buildTextWithBlurredAsterisks(
+                                  shouldShowPartialMask
+                                      ? journee.texte1Masked!
+                                      : (journee.texte1 ?? ''),
+                                  style: TextStyle(
+                                    fontSize: _calculateFontSize(
+                                      journee.texte1 ?? '',
+                                    ),
+                                    color: mainTextColor,
+                                    height: 1.5,
+                                  ),
+                                ),
+
+                            if (!isMyJournees && isMentioned) ...[
+                              const SizedBox(height: 10),
+                              Center(
+                                child: ElevatedButton.icon(
+                                  icon: const Icon(Icons.repeat, size: 18),
+                                  label: const Text('Republier cette journée'),
+                                  onPressed: () => _republierJournee(journee),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.indigo,
+                                    foregroundColor: Colors.white,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                      vertical: 8,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+
+                            if (journee.photoUrls.isNotEmpty) ...[
+                              const SizedBox(height: 12),
+                              SizedBox(
+                                height: 80,
+                                child: ListView.builder(
+                                  scrollDirection: Axis.horizontal,
+                                  itemCount: journee.photoUrls.length,
+                                  itemBuilder: (context, index) {
+                                    final imageUrl = journee.photoUrls[index];
+                                    return Padding(
+                                      padding: const EdgeInsets.only(
+                                        right: 8.0,
+                                      ),
+                                      child: ClipRRect(
+                                        borderRadius: BorderRadius.circular(
+                                          10.0,
+                                        ),
+                                        child: Image.network(
+                                          imageUrl,
+                                          width: 80,
+                                          height: 80,
+                                          fit: BoxFit.cover,
+                                          loadingBuilder: (
+                                            context,
+                                            child,
+                                            loadingProgress,
+                                          ) {
+                                            if (loadingProgress == null)
+                                              return child;
+                                            return Container(
+                                              width: 80,
+                                              height: 80,
+                                              color: Colors.grey[200],
+                                              child: const Center(
+                                                child: CircularProgressIndicator(
+                                                  valueColor:
+                                                      AlwaysStoppedAnimation<
+                                                        Color
+                                                      >(Colors.blue),
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                          errorBuilder: (
+                                            context,
+                                            error,
+                                            stackTrace,
+                                          ) {
+                                            return Container(
+                                              width: 80,
+                                              height: 80,
+                                              color: Colors.grey[200],
+                                              child: const Icon(
+                                                Icons.broken_image,
+                                                color: Colors.grey,
+                                                size: 40,
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                            ],
+
+                            if (journee.commentaire != null &&
+                                journee.commentaire!.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8.0),
+                                child: Text(
+                                  journee.commentaire!,
+                                  style: TextStyle(
+                                    fontStyle: FontStyle.italic,
+                                    color: secondaryTextColor,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ),
+
+                            if (isMyJournees && isToday && isLive) ...[
+                              const SizedBox(height: 10),
+                              Center(
+                                child: ElevatedButton(
+                                  onPressed:
+                                      wordCount >= 4
+                                          ? () => _confirmerJournee(journee)
+                                          : () {
+                                            Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder:
+                                                    (context) =>
+                                                        JourneeEnDirectPage(
+                                                          journeeToEdit:
+                                                              journee,
+                                                        ),
+                                              ),
+                                            );
+                                          },
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor:
+                                        wordCount >= 4
+                                            ? Colors.green.shade600
+                                            : Colors.orange.shade600,
+                                    foregroundColor: Colors.white,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 20,
+                                      vertical: 12,
+                                    ),
+                                    elevation: 3,
+                                  ),
+                                  child: Text(
+                                    wordCount >= 4
+                                        ? 'Confirmer ma journée'
+                                        : 'Écrivez pour confirmer',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                       ),
                     ),
-                  ],
-                  const SizedBox(height: 10),
+
+                  // 3. BAS DE CARTE FIXE (Épinglé)
+                  const SizedBox(height: 5),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
@@ -4519,7 +7206,9 @@ class HomePageState extends State<HomePage>
                           padding: const EdgeInsets.only(right: 8.0),
                           child: Text(
                             journee.emoji!,
-                            style: const TextStyle(fontSize: 24),
+                            style: const TextStyle(
+                              fontSize: 24,
+                            ), // Remis à sa place en bas
                           ),
                         ),
                       if (journee.note != null)
@@ -4527,157 +7216,131 @@ class HomePageState extends State<HomePage>
                           'Note: ${journee.note}',
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
-                            color: Colors.blueGrey.shade700,
+                            color: secondaryTextColor,
                             fontSize: 14,
                           ),
                         ),
                       const Spacer(),
                       if (journee.reactions.isNotEmpty)
-                        ...journee.reactions.entries.map((entry) {
-                          final hasReacted = entry.value.contains(FirebaseAuth.instance.currentUser?.uid ?? '');
-                          return InkWell(
-                            onTap: () {
-                              if (!isMyJournees) {
-                                _handleReaction(journee, entry.key);
-                              }
-                            },
-                            borderRadius: BorderRadius.circular(15),
-                            child: Container(
-                              margin: const EdgeInsets.symmetric(horizontal: 2.0),
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: hasReacted ? Colors.blue.shade100 : Colors.grey.shade200,
-                                borderRadius: BorderRadius.circular(15),
-                                border: hasReacted ? Border.all(color: Colors.blue, width: 1.0) : null,
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(entry.key, style: const TextStyle(fontSize: 16)),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    entry.value.length.toString(),
-                                    style: TextStyle(
-                                      color: Colors.grey.shade800,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold,
+                        Builder(
+                          builder: (context) {
+                            int totalReactions = journee.reactions.values.fold(
+                              0,
+                              (sum, list) => sum + list.length,
+                            );
+                            // Prendre les 2 emojis les plus utilisés pour l'aperçu
+                            var sortedReactions =
+                                journee.reactions.entries.toList()..sort(
+                                  (a, b) =>
+                                      b.value.length.compareTo(a.value.length),
+                                );
+                            String topEmojis = sortedReactions
+                                .take(2)
+                                .map((e) => e.key)
+                                .join('');
+
+                            return InkWell(
+                              onTap: () => _showReactionsDetailsDialog(journee),
+                              borderRadius: BorderRadius.circular(15),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: mainTextColor.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(15),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      topEmojis,
+                                      style: const TextStyle(fontSize: 16),
                                     ),
-                                  ),
-                                ],
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      totalReactions.toString(),
+                                      style: TextStyle(
+                                        color: mainTextColor,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
-                            ),
-                          );
-                        }).toList(),
+                            );
+                          },
+                        ),
                       const Spacer(),
                       if (!isMyJournees)
                         IconButton(
-                          icon: Icon(Icons.add_reaction_outlined, color: Colors.blueGrey.shade400),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          icon: Icon(
+                            Icons.add_reaction_outlined,
+                            color: secondaryTextColor,
+                          ),
                           tooltip: 'Réagir',
                           onPressed: () => _showReactionPicker(journee),
                         ),
+                      const SizedBox(width: 8),
                       IconButton(
-                        icon: Icon(Icons.chat_bubble_outline, color: Colors.blueGrey.shade400),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        icon: Icon(
+                          Icons.chat_bubble_outline,
+                          color: secondaryTextColor,
+                        ),
                         tooltip: 'Commenter',
-                        onPressed: () => _showCommentsDialog(journee, isMyJournees: isMyJournees),
+                        onPressed:
+                            () => _showCommentsDialog(
+                              journee,
+                              isMyJournees: isMyJournees,
+                            ),
                       ),
-                      if (isMyJournees && journee.note != null)
+                      if (isMyJournees && journee.note != null) ...[
+                        const SizedBox(width: 8),
                         IconButton(
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
                           icon: Icon(
-                            _isVip ? Icons.lightbulb_outline : Icons.lock_outline,
-                            color: _isVip ? Colors.amber.shade700 : Colors.grey,
+                            _isVip
+                                ? Icons.lightbulb_outline
+                                : Icons.lock_outline,
+                            color:
+                                _isVip
+                                    ? Colors.amber.shade400
+                                    : secondaryTextColor,
                           ),
                           onPressed: () {
                             if (_isVip) {
                               _showConseilsDialog(journee);
                             } else {
-                              showVipPromotionPopup(context, "Conseils de l'IA");
+                              showVipPromotionPopup(
+                                context,
+                                "Conseils de l'IA",
+                              );
                             }
                           },
-                          tooltip: _isVip ? 'Voir les conseils de l\'IA' : 'Fonctionnalité VIP',
+                          tooltip:
+                              _isVip
+                                  ? 'Voir les conseils de l\'IA'
+                                  : 'Fonctionnalité VIP',
                         ),
+                      ],
                     ],
                   ),
-                  FutureBuilder<List<SouvenirModel>>(
-                      future: _getSouvenirsForJournee(journee),
-                      builder: (context, snapshot) {
-                        if (snapshot.connectionState == ConnectionState.done && snapshot.hasData && snapshot.data!.isNotEmpty) {
-                          return Center(
-                            child: ValueListenableBuilder<bool>(
-                              valueListenable: souvenirVisible,
-                              builder: (context, isVisible, child) {
-                                return IconButton(
-                                  icon: Icon(
-                                    isVisible ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
-                                    color: Colors.blue.shade700,
-                                  ),
-                                  onPressed: () {
-                                    souvenirVisible.value = !souvenirVisible.value;
-                                  },
-                                );
-                              },
-                            ),
-                          );
-                        }
-                        return const SizedBox.shrink();
-                      }
-                  ),
-                  ValueListenableBuilder<bool>(
-                    valueListenable: souvenirVisible,
-                    builder: (context, isVisible, child) {
-                      if (!isVisible) return const SizedBox.shrink();
-                      return FutureBuilder<List<SouvenirModel>>(
-                        future: _getSouvenirsForJournee(journee),
-                        builder: (context, snapshot) {
-                          if (snapshot.connectionState == ConnectionState.waiting) {
-                            return const Center(child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.blue)));
-                          }
-                          if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                            return const Padding(
-                              padding: EdgeInsets.all(8.0),
-                              child: Text(
-                                'Aucun souvenir associé',
-                                style: TextStyle(
-                                  fontStyle: FontStyle.italic,
-                                  color: Colors.grey,
-                                  fontSize: 13,
-                                ),
-                              ),
-                            );
-                          }
-                          return Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Divider(color: Colors.blueAccent),
-                              const Padding(
-                                padding: EdgeInsets.symmetric(vertical: 8.0),
-                                child: Text(
-                                  'Souvenirs associés :',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.blue,
-                                    fontSize: 16,
-                                  ),
-                                ),
-                              ),
-                              SizedBox(
-                                height: 120,
-                                child: ListView.builder(
-                                  scrollDirection: Axis.horizontal,
-                                  itemCount: snapshot.data!.length,
-                                  itemBuilder: (context, index) {
-                                    return Container(
-                                      width: 180,
-                                      margin: const EdgeInsets.only(right: 10.0),
-                                      child: _buildSouvenirCard(snapshot.data![index], showRepublishButton: showRepublishButton, hasUserPostedToday: hasUserPostedToday),
-                                    );
-                                  },
-                                ),
-                              ),
-                            ],
-                          );
-                        },
-                      );
-                    },
+
+                  // 4. SOUVENIRS ASSOCIÉS FIXES (Épinglés)
+                  _AssociatedMemoriesWidget(
+                    journee: journee,
+                    souvenirs: _getSouvenirsForJournee(journee),
+                    showRepublishButton: showRepublishButton,
+                    hasUserPostedToday: hasUserPostedToday,
+                    buildSouvenirCard: _buildSouvenirCard,
+                    mainTextColor: mainTextColor,
                   ),
                 ],
               ),
@@ -4688,16 +7351,24 @@ class HomePageState extends State<HomePage>
     );
   }
 
-  Widget _buildJourneeList(List<JourneeModel> journees, String title, {bool showRepublishButton = false, required bool hasUserPostedToday}) {
+  Widget _buildJourneeList(
+    List<JourneeModel> journees,
+    String title, {
+    bool showRepublishButton = false,
+    required bool hasUserPostedToday,
+  }) {
     final currentUser = FirebaseAuth.instance.currentUser;
 
-    final List<JourneeModel> filteredJournees = journees.where((journee) {
-      final isOwner = journee.userId == currentUser?.uid;
-      if ((title == 'Journées de mes amis' || title == 'Journées mondiales') && isOwner) {
-        return false;
-      }
-      return true;
-    }).toList();
+    final List<JourneeModel> filteredJournees =
+        journees.where((journee) {
+          final isOwner = journee.userId == currentUser?.uid;
+          if ((title == 'Journées de mes amis' ||
+                  title == 'Journées mondiales') &&
+              isOwner) {
+            return false;
+          }
+          return true;
+        }).toList();
 
     final sortedJournees = List<JourneeModel>.from(filteredJournees)
       ..sort((a, b) => b.date.compareTo(a.date));
@@ -4709,143 +7380,153 @@ class HomePageState extends State<HomePage>
     }
 
     return Padding(
-        padding: const EdgeInsets.only(bottom: 90.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if ((title == 'Journées de mes amis' || title == 'Journées mondiales') && !hasUserPostedToday)
-              const Padding(
-                padding: EdgeInsets.all(8.0),
-                child: Text(
-                  'Postez votre journée pour voir le contenu complet des autres utilisateurs.',
-                  style: TextStyle(
-                    color: Colors.blue,
-                    fontStyle: FontStyle.italic,
-                    fontSize: 13,
-                  ),
-                ),
-              ),
-            Expanded(
-              child: PageView.builder(
-                controller: _journeePageController,
-                itemCount: displayItems.length,
-                itemBuilder: (context, index) {
-                  final journee = displayItems[index];
-                  final isMyJournees = title == 'Mes Journées';
-                  final isOwner = journee.userId == currentUser?.uid;
+      padding: const EdgeInsets.only(bottom: 90.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: PageView.builder(
+              controller: _journeePageController,
+              itemCount: displayItems.length,
+              itemBuilder: (context, index) {
+                final journee = displayItems[index];
+                final isMyJournees = title == 'Mes Journées';
+                final isOwner = journee.userId == currentUser?.uid;
 
-                  return Column(
-                    children: [
-                      // --- CORRECTION CI-DESSOUS ---
-                      // On utilise maintenant notre fonction _getUserData avec cache.
-                      // Le FutureBuilder ne se relancera plus inutilement.
-                      FutureBuilder<Map<String, dynamic>>(
-                        future: _getUserData(journee.userId ?? ''),
-                        builder: (context, userSnapshot) {
-                          String username;
-                          Widget trailingWidget;
+                return Column(
+                  children: [
+                    FutureBuilder<Map<String, dynamic>>(
+                      future: _getUserData(journee.userId ?? ''),
+                      builder: (context, userSnapshot) {
+                        String username;
+                        Widget trailingWidget;
 
-                          if (userSnapshot.connectionState == ConnectionState.waiting && !userSnapshot.hasData) {
-                            // Affiche les points qui clignotent pendant le tout premier chargement
-                            username = '';
-                            trailingWidget = const _BlinkingDots();
-                          } else {
-                            final userData = userSnapshot.data ?? {'username': 'Utilisateur Inconnu'};
-                            username = userData['username'] ?? 'Utilisateur Inconnu';
-                            trailingWidget = !isMyJournees
-                                ? PopupMenuButton<String>(
-                              icon: const Icon(Icons.more_vert, color: Colors.blueGrey),
-                              onSelected: (value) {
-                                if (value == 'signaler') {
-                                  _signalerJournee(journee);
-                                } else if (value == 'republier_journee') {
-                                  _republierJournee(journee);
-                                } else if (value == 'republier_souvenir') {
-                                  _republierSouvenir(journee);
-                                }
-                              },
-                              itemBuilder: (BuildContext context) {
-                                List<PopupMenuEntry<String>> items = [];
-                                if (showRepublishButton && !isOwner && !hasUserPostedToday) {
-                                  items.add(const PopupMenuItem(value: 'republier_journee', child: Text('Republier cette journée')));
-                                }
-                                if (showRepublishButton && !isOwner) {
-                                  items.add(const PopupMenuItem(value: 'republier_souvenir', child: Text('Republier en souvenir')));
-                                }
-                                items.add(const PopupMenuItem(value: 'signaler', child: Text('Signaler')));
-                                return items;
-                              },
-                            )
-                                : const SizedBox.shrink(); // Pas de menu pour ses propres journées ici
-                          }
-
-                          return Padding(
-                            padding: const EdgeInsets.fromLTRB(16.0, 10.0, 4.0, 5.0),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.center,
-                              children: [
-                                Expanded(
-                                  child: isMyJournees
-                                      ? Center(
-                                    child: Text(
-                                      _formatDate(journee.date),
-                                      style: TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.blue.shade700,
-                                      ),
+                        if (userSnapshot.connectionState ==
+                                ConnectionState.waiting &&
+                            !userSnapshot.hasData) {
+                          username = '';
+                          trailingWidget = const _BlinkingDots();
+                        } else {
+                          final userData =
+                              userSnapshot.data ??
+                              {'username': 'Utilisateur Inconnu'};
+                          username =
+                              userData['username'] ?? 'Utilisateur Inconnu';
+                          trailingWidget =
+                              !isMyJournees
+                                  ? PopupMenuButton<String>(
+                                    icon: const Icon(
+                                      Icons.more_vert,
+                                      color: Colors.blueGrey,
                                     ),
+                                    onSelected: (value) {
+                                      if (value == 'signaler') {
+                                        _signalerJournee(journee);
+                                      }
+                                    },
+                                    // --- MODIFICATION ---
+                                    // Le itemBuilder ne retourne plus que l'option "Signaler"
+                                    itemBuilder: (BuildContext context) {
+                                      return [
+                                        const PopupMenuItem(
+                                          value: 'signaler',
+                                          child: Text('Signaler'),
+                                        ),
+                                      ];
+                                    },
+                                    // --- FIN DE LA MODIFICATION ---
                                   )
-                                      : Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      GestureDetector(
-                                        onTap: () {
-                                          Navigator.push(
-                                            context,
-                                            MaterialPageRoute(
-                                              builder: (context) => ProfileUserPage(userId: journee.userId ?? ''),
+                                  : const SizedBox.shrink();
+                        }
+
+                        return Padding(
+                          padding: const EdgeInsets.fromLTRB(
+                            16.0,
+                            10.0,
+                            4.0,
+                            5.0,
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              Expanded(
+                                child:
+                                    isMyJournees
+                                        ? Center(
+                                          child: Text(
+                                            _formatDate(journee.date),
+                                            style: TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.blue.shade700,
                                             ),
-                                          );
-                                        },
-                                        child: Text(
-                                          '@$username',
-                                          style: const TextStyle(
-                                            fontSize: 15,
-                                            color: Colors.blue,
-                                            fontWeight: FontWeight.w600,
                                           ),
+                                        )
+                                        : Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
+                                          children: [
+                                            GestureDetector(
+                                              onTap: () {
+                                                Navigator.push(
+                                                  context,
+                                                  MaterialPageRoute(
+                                                    builder:
+                                                        (context) =>
+                                                            ProfileUserPage(
+                                                              userId:
+                                                                  journee
+                                                                      .userId ??
+                                                                  '',
+                                                            ),
+                                                  ),
+                                                );
+                                              },
+                                              child: Text(
+                                                '@$username',
+                                                style: const TextStyle(
+                                                  fontSize: 15,
+                                                  color: Colors.blue,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                            ),
+                                            Text(
+                                              _formatDate(journee.date),
+                                              style: const TextStyle(
+                                                color: Colors.grey,
+                                                fontSize: 11,
+                                              ),
+                                            ),
+                                          ],
                                         ),
-                                      ),
-                                      Text(
-                                        _formatDate(journee.date),
-                                        style: const TextStyle(
-                                          color: Colors.grey,
-                                          fontSize: 11,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                trailingWidget,
-                              ],
-                            ),
-                          );
-                        },
+                              ),
+                              trailingWidget,
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                    Expanded(
+                      child: _buildJourneeCard(
+                        journee,
+                        title,
+                        showRepublishButton: showRepublishButton,
+                        hasUserPostedToday: hasUserPostedToday,
                       ),
-                      Expanded(
-                        child: _buildJourneeCard(journee, title, showRepublishButton: showRepublishButton, hasUserPostedToday: hasUserPostedToday),
-                      ),
-                    ],
-                  );
-                },
-              ),
+                    ),
+                  ],
+                );
+              },
             ),
-          ],
-        )
+          ),
+        ],
+      ),
     );
   }
+
   void _showReactionPicker(JourneeModel journee) {
     final List<String> reactions = ['👍', '❤️', '😂', '😮', '😢', '😡'];
     showModalBottomSheet(
@@ -4855,7 +7536,10 @@ class HomePageState extends State<HomePage>
         return SafeArea(
           child: Container(
             margin: const EdgeInsets.all(16.0),
-            padding: const EdgeInsets.symmetric(vertical: 20.0, horizontal: 16.0),
+            padding: const EdgeInsets.symmetric(
+              vertical: 20.0,
+              horizontal: 16.0,
+            ),
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(25.0),
@@ -4864,25 +7548,30 @@ class HomePageState extends State<HomePage>
               alignment: WrapAlignment.center,
               spacing: 20.0,
               runSpacing: 10.0,
-              children: reactions.map((emoji) {
-                return InkWell(
-                  onTap: () {
-                    Navigator.pop(context);
-                    _handleReaction(journee, emoji);
-                  },
-                  borderRadius: BorderRadius.circular(24),
-                  child: Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: Text(emoji, style: const TextStyle(fontSize: 32)),
-                  ),
-                );
-              }).toList(),
+              children:
+                  reactions.map((emoji) {
+                    return InkWell(
+                      onTap: () {
+                        Navigator.pop(context);
+                        _handleReaction(journee, emoji);
+                      },
+                      borderRadius: BorderRadius.circular(24),
+                      child: Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: Text(
+                          emoji,
+                          style: const TextStyle(fontSize: 32),
+                        ),
+                      ),
+                    );
+                  }).toList(),
             ),
           ),
         );
       },
     );
   }
+
   void _republierJournee(JourneeModel journee) async {
     Navigator.push(
       context,
@@ -4916,14 +7605,16 @@ class HomePageState extends State<HomePage>
 
   Future<String?> _getUsernameById(String userId) async {
     try {
-      DocumentSnapshot userDoc = await _firestore.collection('users').doc(userId).get();
+      DocumentSnapshot userDoc =
+          await _firestore.collection('users').doc(userId).get();
       return userDoc['username'];
     } catch (e) {
-      print('Erreur lors de la récupération du nom d\'utilisateur pour $userId: $e');
+      print(
+        'Erreur lors de la récupération du nom d\'utilisateur pour $userId: $e',
+      );
       return null;
     }
   }
-
 
   int _countWords(String text) {
     if (text.isEmpty) return 0;
@@ -4937,82 +7628,23 @@ class HomePageState extends State<HomePage>
       );
       return;
     }
-
-    try {
-      await _obtenirNote(journee.texte1 ?? '');
-
-      final int? note = _note;
-      if (note != null && note >= 0) {
-        await _firestore.collection('journees').doc(journee.id).update({
-          'note': '$_note/100',
-          'motsCles': _motsCles,
-          'dateModification': FieldValue.serverTimestamp(),
-        });
-
-        DocumentSnapshot userDoc = await _firestore
-            .collection('users')
-            .doc(FirebaseAuth.instance.currentUser!.uid)
-            .get();
-
-        int qualiteDeVieActuelle = userDoc.exists
-            ? (userDoc.data() as Map<String, dynamic>)['qualiteDeVieActuelle'] ?? 50
-            : 50;
-        final username = (userDoc.data() as Map<String, dynamic>)['username'] ?? 'Quelqu\'un';
-
-
-        int nouvelleQualiteDeVie = ((qualiteDeVieActuelle * 2 + note) / 3).round();
-        nouvelleQualiteDeVie = nouvelleQualiteDeVie.clamp(0, 100);
-
-        await _firestore
-            .collection('users')
-            .doc(FirebaseAuth.instance.currentUser!.uid)
-            .update({
-          'qualiteDeVieActuelle': nouvelleQualiteDeVie,
-        });
-
-// AMÉLIORATION : Envoyer une notification aux amis
-        NotificationService.notifyFriendsOfNewPost(username);
-
-        setState(() {
-          journee.note = '$_note/100';
-          journee.motsCles = _motsCles;
-          _isNoteObtained = true;
-          _myJournees = List.from(_myJournees);
-        });
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Journée confirmée avec succès : $_note/100'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Erreur lors de l\'obtention de la note'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    } catch (e) {
-      print('Erreur lors de la confirmation de la journée : $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Erreur : $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
+    if (!mounted) return;
+    final bool? wasModified = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => JourneePage(journeeToEdit: journee),
+      ),
+    );
+    if (wasModified == true && mounted) setState(() {});
   }
 
   Future<void> _obtenirNote(String texte) async {
     if (texte.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Aucun texte à évaluer')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Aucun texte à évaluer')));
       return;
     }
-
 
     SharedPreferences prefs = await SharedPreferences.getInstance();
     String iaPreference = prefs.getString('iaPreference') ?? 'ressenti';
@@ -5020,13 +7652,13 @@ class HomePageState extends State<HomePage>
     String prompt;
     if (iaPreference == 'ressenti') {
       prompt =
-      'Analyse ce texte et donne une note sur 100 basée sur le ressenti global de la journée. Réponds uniquement avec un nombre entier entre 0 et 100 suivi de "/100", par exemple "75/100". Texte : $texte';
+          'Analyse ce texte et donne une note sur 100 basée sur le ressenti global de la journée. Réponds uniquement avec un nombre entier entre 0 et 100 suivi de "/100", par exemple "75/100". Texte : $texte';
     } else {
       prompt =
-      'Analyse ce texte et donne une note sur 100 basée sur la qualité globale des événements de la journée. Réponds uniquement avec un nombre entier entre 0 et 100 suivi de "/100", par exemple "75/100". Texte : $texte';
+          'Analyse ce texte et donne une note sur 100 basée sur la qualité globale des événements de la journée. Réponds uniquement avec un nombre entier entre 0 et 100 suivi de "/100", par exemple "75/100". Texte : $texte';
     }
 
-    const url = 'https://api.deepseek.com/v1/chat/completions';
+    const url = 'https://api.deepinfra.com/v1/openai/chat/completions';
     try {
       final response = await http.post(
         Uri.parse(url),
@@ -5035,12 +7667,9 @@ class HomePageState extends State<HomePage>
           'Authorization': 'Bearer $DEEPSEEK_API_KEY',
         },
         body: jsonEncode({
-          'model': 'deepseek-chat',
+          'model': await resolveAiModel(isVip: _isVip),
           'messages': [
-            {
-              'role': 'user',
-              'content': prompt
-            }
+            {'role': 'user', 'content': prompt},
           ],
           'max_tokens': 50,
         }),
@@ -5054,7 +7683,8 @@ class HomePageState extends State<HomePage>
         if (data.containsKey('choices') &&
             data['choices'] is List &&
             data['choices'].isNotEmpty) {
-          final noteText = data['choices'][0]['message']['content']?.toString() ?? '';
+          final noteText =
+              data['choices'][0]['message']['content']?.toString() ?? '';
 
           if (noteText.isEmpty) {
             print('Contenu vide dans choices');
@@ -5106,7 +7736,9 @@ class HomePageState extends State<HomePage>
           });
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('La réponse de l\'API ne contient pas de contenu valide.'),
+              content: Text(
+                'La réponse de l\'API ne contient pas de contenu valide.',
+              ),
               backgroundColor: Colors.orange,
             ),
           );
@@ -5119,7 +7751,9 @@ class HomePageState extends State<HomePage>
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erreur lors de l\'obtention de la note : ${response.statusCode}'),
+            content: Text(
+              'Erreur lors de l\'obtention de la note : ${response.statusCode}',
+            ),
             backgroundColor: Colors.red,
           ),
         );
@@ -5141,21 +7775,56 @@ class HomePageState extends State<HomePage>
 
   String normaliserId(String texte) {
     final Map<String, String> accentsMap = {
-      'à': 'a', 'á': 'a', 'â': 'a', 'ã': 'a', 'ä': 'a',
+      'à': 'a',
+      'á': 'a',
+      'â': 'a',
+      'ã': 'a',
+      'ä': 'a',
       'ç': 'c',
-      'è': 'e', 'é': 'e', 'ê': 'e', 'ë': 'e',
-      'ì': 'i', 'í': 'i', 'î': 'i', 'ï': 'i',
+      'è': 'e',
+      'é': 'e',
+      'ê': 'e',
+      'ë': 'e',
+      'ì': 'i',
+      'í': 'i',
+      'î': 'i',
+      'ï': 'i',
       'ñ': 'n',
-      'ò': 'o', 'ó': 'o', 'ô': 'o', 'õ': 'o', 'ö': 'o',
-      'ù': 'u', 'ú': 'u', 'û': 'u', 'ü': 'u',
-      'ý': 'y', 'ÿ': 'y',
-      'À': 'a', 'Á': 'a', 'Â': 'a', 'Ã': 'a', 'Ä': 'a',
+      'ò': 'o',
+      'ó': 'o',
+      'ô': 'o',
+      'õ': 'o',
+      'ö': 'o',
+      'ù': 'u',
+      'ú': 'u',
+      'û': 'u',
+      'ü': 'u',
+      'ý': 'y',
+      'ÿ': 'y',
+      'À': 'a',
+      'Á': 'a',
+      'Â': 'a',
+      'Ã': 'a',
+      'Ä': 'a',
       'Ç': 'c',
-      'È': 'e', 'É': 'e', 'Ê': 'e', 'Ë': 'e',
-      'Ì': 'i', 'Í': 'i', 'Î': 'i', 'Ï': 'i',
+      'È': 'e',
+      'É': 'e',
+      'Ê': 'e',
+      'Ë': 'e',
+      'Ì': 'i',
+      'Í': 'i',
+      'Î': 'i',
+      'Ï': 'i',
       'Ñ': 'n',
-      'Ò': 'o', 'Ó': 'o', 'Ô': 'o', 'Õ': 'o', 'Ö': 'o',
-      'Ù': 'u', 'Ú': 'u', 'Û': 'u', 'Ü': 'u',
+      'Ò': 'o',
+      'Ó': 'o',
+      'Ô': 'o',
+      'Õ': 'o',
+      'Ö': 'o',
+      'Ù': 'u',
+      'Ú': 'u',
+      'Û': 'u',
+      'Ü': 'u',
       'Ý': 'y',
     };
 
@@ -5175,14 +7844,18 @@ class HomePageState extends State<HomePage>
   Future<void> _enregistrerElementsInteressants(String texte) async {
     User? currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Vous devez être connecté')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Vous devez être connecté')));
       return;
     }
     if (DEEPSEEK_API_KEY == 'VOTRE_CLÉ_API_DEEPSEEK') {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Clé API DeepSeek non configurée pour la catégorisation.')),
+        const SnackBar(
+          content: Text(
+            'Clé API DeepSeek non configurée pour la catégorisation.',
+          ),
+        ),
       );
       return;
     }
@@ -5190,7 +7863,7 @@ class HomePageState extends State<HomePage>
     print('Début de l\'analyse pour catégorisation...');
     print('Texte à analyser: $texte');
 
-    const url = 'https://api.deepseek.com/v1/chat/completions';
+    const url = 'https://api.deepinfra.com/v1/openai/chat/completions';
     try {
       final response = await http.post(
         Uri.parse(url),
@@ -5199,11 +7872,12 @@ class HomePageState extends State<HomePage>
           'Authorization': 'Bearer $DEEPSEEK_API_KEY',
         },
         body: jsonEncode({
-          'model': 'deepseek-chat',
+          'model': await resolveAiModel(isVip: _isVip),
           'messages': [
             {
               'role': 'user',
-              'content': '''Analyse ce texte et extrais les éléments intéressants qui pourraient être expliqués dans une biographie.
+              'content':
+                  '''Analyse ce texte et extrais les éléments intéressants qui pourraient être expliqués dans une biographie.
           Pour chaque élément, détermine une catégorie thématique générale (comme "amis", "travail", "famille", "loisirs", "santé", "voyage", "éducation", "événements").
           Utilise uniquement des mots simples et des catégories générales.
           Réponds STRICTEMENT au format JSON suivant, sans aucun texte supplémentaire, ni préambule, ni postface. Assure-toi que la liste 'elements' est toujours présente, même vide:
@@ -5217,8 +7891,8 @@ class HomePageState extends State<HomePage>
             ]
           }
 
-          Texte à analyser : $texte'''
-            }
+          Texte à analyser : $texte''',
+            },
           ],
           'max_tokens': 500,
         }),
@@ -5228,14 +7902,18 @@ class HomePageState extends State<HomePage>
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        String elementsText = data['choices']?[0]['message']['content']?.toString() ?? '';
+        String elementsText =
+            data['choices']?[0]['message']['content']?.toString() ?? '';
 
         print('Réponse brute: $elementsText');
 
         Map<String, dynamic>? parsedElements;
         try {
           elementsText = elementsText.trim();
-          elementsText = elementsText.replaceAll(RegExp(r'^```json\s*|\s*```$'), '');
+          elementsText = elementsText.replaceAll(
+            RegExp(r'^```json\s*|\s*```$'),
+            '',
+          );
           parsedElements = jsonDecode(elementsText);
           print('JSON parsé avec succès');
         } catch (jsonError) {
@@ -5254,15 +7932,19 @@ class HomePageState extends State<HomePage>
         }
 
         if (parsedElements != null && parsedElements.containsKey('elements')) {
-          List<dynamic> elements = parsedElements['elements'] is List ? parsedElements['elements'] : [];
+          List<dynamic> elements =
+              parsedElements['elements'] is List
+                  ? parsedElements['elements']
+                  : [];
           print('Éléments trouvés: ${elements.length}');
 
           if (elements.isNotEmpty) {
-            final categoriesSnapshot = await FirebaseFirestore.instance
-                .collection('users')
-                .doc(currentUser.uid)
-                .collection('categories_elements')
-                .get();
+            final categoriesSnapshot =
+                await FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(currentUser.uid)
+                    .collection('categories_elements')
+                    .get();
 
             Map<String, String> categoriesExistantes = {};
             for (var doc in categoriesSnapshot.docs) {
@@ -5271,7 +7953,9 @@ class HomePageState extends State<HomePage>
               categoriesExistantes[nomCategorie.toLowerCase()] = doc.id;
             }
 
-            print('Catégories existantes: ${categoriesExistantes.keys.join(", ")}');
+            print(
+              'Catégories existantes: ${categoriesExistantes.keys.join(", ")}',
+            );
             int elementsTraites = 0;
 
             for (var element in elements) {
@@ -5279,7 +7963,9 @@ class HomePageState extends State<HomePage>
                   !element.containsKey('texte') ||
                   !element.containsKey('explication') ||
                   !element.containsKey('categorie')) {
-                print('Élément incomplet ou format incorrect, ignoré: $element');
+                print(
+                  'Élément incomplet ou format incorrect, ignoré: $element',
+                );
                 continue;
               }
 
@@ -5293,15 +7979,23 @@ class HomePageState extends State<HomePage>
               }
 
               String categorieNormalisee = normaliserId(categorieNom);
-              print('Traitement de l\'élément: "$texteElement" (Catégorie: "$categorieNom", normalisée: "$categorieNormalisee")');
+              print(
+                'Traitement de l\'élément: "$texteElement" (Catégorie: "$categorieNom", normalisée: "$categorieNormalisee")',
+              );
 
               String categorieId;
               if (categoriesExistantes.containsKey(categorieNormalisee)) {
                 categorieId = categoriesExistantes[categorieNormalisee]!;
-                print('Catégorie existante trouvée via ID normalisé: $categorieId');
-              } else if (categoriesExistantes.containsKey(categorieNom.toLowerCase())) {
+                print(
+                  'Catégorie existante trouvée via ID normalisé: $categorieId',
+                );
+              } else if (categoriesExistantes.containsKey(
+                categorieNom.toLowerCase(),
+              )) {
                 categorieId = categoriesExistantes[categorieNom.toLowerCase()]!;
-                print('Catégorie existante trouvée via nom exact: $categorieId');
+                print(
+                  'Catégorie existante trouvée via nom exact: $categorieId',
+                );
               } else {
                 String docId = normaliserId(categorieNom);
                 if (docId.isEmpty) {
@@ -5322,8 +8016,11 @@ class HomePageState extends State<HomePage>
 
                   categorieId = docId;
                   categoriesExistantes[categorieNormalisee] = categorieId;
-                  categoriesExistantes[categorieNom.toLowerCase()] = categorieId;
-                  print('Nouvelle catégorie créée: $categorieNom (ID: $categorieId)');
+                  categoriesExistantes[categorieNom.toLowerCase()] =
+                      categorieId;
+                  print(
+                    'Nouvelle catégorie créée: $categorieNom (ID: $categorieId)',
+                  );
                 } catch (e) {
                   print('Erreur lors de la création de la catégorie: $e');
                   continue;
@@ -5338,13 +8035,13 @@ class HomePageState extends State<HomePage>
                     .doc(categorieId)
                     .collection('elements')
                     .add({
-                  'texte': texteElement,
-                  'explication': explication,
-                  'date': Timestamp.now(),
-                  'isRepost': false,
-                  'repostedFromUserId': null,
-                  'repostedFromUserName': null,
-                });
+                      'texte': texteElement,
+                      'explication': explication,
+                      'date': Timestamp.now(),
+                      'isRepost': false,
+                      'repostedFromUserId': null,
+                      'repostedFromUserName': null,
+                    });
 
                 elementsTraites++;
                 print('Élément ajouté à la catégorie: $categorieId');
@@ -5356,7 +8053,9 @@ class HomePageState extends State<HomePage>
             if (elementsTraites > 0) {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
-                  content: Text('$elementsTraites éléments intéressants classifiés et enregistrés'),
+                  content: Text(
+                    '$elementsTraites éléments intéressants classifiés et enregistrés',
+                  ),
                   backgroundColor: Colors.green,
                 ),
               );
@@ -5372,7 +8071,9 @@ class HomePageState extends State<HomePage>
             print('Aucun élément trouvé dans le JSON');
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('Aucun élément intéressant identifié dans le texte'),
+                content: Text(
+                  'Aucun élément intéressant identifié dans le texte',
+                ),
                 backgroundColor: Colors.blue,
               ),
             );
@@ -5382,7 +8083,9 @@ class HomePageState extends State<HomePage>
           print('Contenu parsé: $parsedElements');
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Erreur lors de l\'analyse du texte : Format de réponse IA inattendu.'),
+              content: Text(
+                'Erreur lors de l\'analyse du texte : Format de réponse IA inattendu.',
+              ),
               backgroundColor: Colors.orange,
             ),
           );
@@ -5398,12 +8101,11 @@ class HomePageState extends State<HomePage>
         );
       }
     } catch (e) {
-      print('Erreur globale lors de l\'enregistrement des éléments intéressants : $e');
+      print(
+        'Erreur globale lors de l\'enregistrement des éléments intéressants : $e',
+      );
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Erreur: $e'),
-          backgroundColor: Colors.red,
-        ),
+        SnackBar(content: Text('Erreur: $e'), backgroundColor: Colors.red),
       );
     }
   }
@@ -5413,7 +8115,7 @@ class HomePageState extends State<HomePage>
       print("ERREUR : Clé API DeepSeek non configurée pour les mots-clés.");
       return ['default1', 'default2', 'default3', 'default4', 'default5'];
     }
-    const url = 'https://api.deepseek.com/v1/chat/completions';
+    const url = 'https://api.deepinfra.com/v1/openai/chat/completions';
     try {
       final response = await http.post(
         Uri.parse(url),
@@ -5422,17 +8124,17 @@ class HomePageState extends State<HomePage>
           'Authorization': 'Bearer $DEEPSEEK_API_KEY',
         },
         body: jsonEncode({
-          'model': 'deepseek-chat',
+          'model': await resolveAiModel(isVip: _isVip),
           'messages': [
             {
               'role': 'user',
               'content':
-              '''Analyse ce texte et extrais exactement 5 mots-clés qui résument les thèmes principaux de la journée. Réponds uniquement avec une liste JSON de 5 mots, sans texte supplémentaire, ni préambule, ni postface. Assure-toi que la liste 'mots_cles' est toujours présente, même vide si aucun mot-clé n'est pertinent:
+                  '''Analyse ce texte et extrais exactement 5 mots-clés qui résument les thèmes principaux de la journée. Réponds uniquement avec une liste JSON de 5 mots, sans texte supplémentaire, ni préambule, ni postface. Assure-toi que la liste 'mots_cles' est toujours présente, même vide si aucun mot-clé n'est pertinent:
                 {
                   "mots_cles": ["mot1", "mot2", "mot3", "mot4", "mot5"]
                 }
-                Texte à analyser : $texte'''
-            }
+                Texte à analyser : $texte''',
+            },
           ],
           'max_tokens': 100,
         }),
@@ -5440,7 +8142,8 @@ class HomePageState extends State<HomePage>
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        String content = data['choices']?[0]['message']['content']?.toString() ?? '';
+        String content =
+            data['choices']?[0]['message']['content']?.toString() ?? '';
 
         if (content.isEmpty) {
           print('Contenu vide dans la réponse des mots-clés');
@@ -5453,7 +8156,9 @@ class HomePageState extends State<HomePage>
           final motsClesParsed = jsonDecode(content);
           if (motsClesParsed.containsKey('mots_cles') &&
               motsClesParsed['mots_cles'] is List) {
-            List<String> extracted = List<String>.from(motsClesParsed['mots_cles']);
+            List<String> extracted = List<String>.from(
+              motsClesParsed['mots_cles'],
+            );
             if (extracted.length > 5) {
               return extracted.sublist(0, 5);
             } else if (extracted.length < 5) {
@@ -5467,7 +8172,9 @@ class HomePageState extends State<HomePage>
             return ['default1', 'default2', 'default3', 'default4', 'default5'];
           }
         } catch (e) {
-          print('Erreur de parsing JSON pour mots-clés : $e, contenu : $content');
+          print(
+            'Erreur de parsing JSON pour mots-clés : $e, contenu : $content',
+          );
           return ['default1', 'default2', 'default3', 'default4', 'default3'];
         }
       } else {
@@ -5492,97 +8199,318 @@ class HomePageState extends State<HomePage>
     }
   }
 
-  Future<void> _handleReaction(JourneeModel journee, String selectedEmoji) async {
+  Future<void> _handleReaction(
+    JourneeModel journee,
+    String selectedEmoji,
+  ) async {
     final userId = FirebaseAuth.instance.currentUser?.uid;
-    if (userId == null) return;
+    if (userId == null || journee.id == null) return;
+
+    bool isNewReaction = false;
 
     try {
       final journeeRef = _firestore.collection('journees').doc(journee.id);
-      final docSnapshot = await journeeRef.get();
 
-      if (!docSnapshot.exists) {
-        throw Exception("Le document de la journée n'existe pas.");
-      }
+      await _firestore.runTransaction((transaction) async {
+        final docSnapshot = await transaction.get(journeeRef);
+        if (!docSnapshot.exists)
+          throw Exception("Le document de la journée n'existe pas.");
 
-      final data = docSnapshot.data();
-      if (data == null) {
-        throw Exception("Les données du document sont nulles.");
-      }
-
-      Map<String, List<String>> currentReactions = {};
-      if (data['reactions'] is Map) {
-        final reactionsData = data['reactions'] as Map<String, dynamic>;
-        reactionsData.forEach((emoji, users) {
-          if (users is List) {
-            currentReactions[emoji] = List<String>.from(users);
-          }
-        });
-      }
-
-      String? existingEmoji;
-      currentReactions.forEach((emoji, users) {
-        if (users.contains(userId)) {
-          existingEmoji = emoji;
+        final data = docSnapshot.data() ?? {};
+        Map<String, List<String>> currentReactions = {};
+        if (data['reactions'] is Map) {
+          (data['reactions'] as Map<String, dynamic>).forEach((emoji, users) {
+            if (users is List) {
+              currentReactions[emoji] = List<String>.from(users);
+            }
+          });
         }
-      });
 
-      if (existingEmoji != null) {
-        if (existingEmoji == selectedEmoji) {
+        String? existingEmoji;
+        currentReactions.forEach((emoji, users) {
+          if (users.contains(userId)) existingEmoji = emoji;
+        });
+
+        if (existingEmoji != null) {
+          // L'utilisateur a déjà réagi
           currentReactions[existingEmoji]?.remove(userId);
           if (currentReactions[existingEmoji]?.isEmpty ?? false) {
             currentReactions.remove(existingEmoji);
           }
+          if (existingEmoji != selectedEmoji) {
+            // Changer de réaction
+            currentReactions.update(
+              selectedEmoji,
+              (v) => [...v, userId],
+              ifAbsent: () => [userId],
+            );
+            isNewReaction = true;
+          }
+          // Si même emoji : suppression (toggle off)
         } else {
-          currentReactions[existingEmoji]?.remove(userId);
-          if (currentReactions[existingEmoji]?.isEmpty ?? false) {
-            currentReactions.remove(existingEmoji);
-          }
+          // Nouvelle réaction
           currentReactions.update(
             selectedEmoji,
-                (value) => [...value, userId],
+            (v) => [...v, userId],
             ifAbsent: () => [userId],
           );
+          isNewReaction = true;
         }
-      } else {
-        currentReactions.update(
-          selectedEmoji,
-              (value) => [...value, userId],
-          ifAbsent: () => [userId],
+
+        transaction.update(journeeRef, {'reactions': currentReactions});
+      });
+
+      // Notifier seulement si c'est une nouvelle réaction (pas une suppression)
+      if (isNewReaction) {
+        final currentUserDoc =
+            await _firestore.collection('users').doc(userId).get();
+        final username = currentUserDoc.data()?['username'] ?? 'Quelqu\'un';
+        NotificationService.notifyOwnerOnInteraction(
+          journeeId: journee.id!,
+          interactorName: username,
+          action: "réagi à",
         );
       }
-
-      await journeeRef.update({'reactions': currentReactions});
-
-// --- AMÉLIORATION : Envoyer une notification ---
-      final currentUserDoc = await _firestore.collection('users').doc(userId).get();
-      final username = currentUserDoc.data()?['username'] ?? 'Quelqu\'un';
-      NotificationService.notifyOwnerOnInteraction(
-        journeeId: journee.id!,
-        interactorName: username,
-        action: "réagi à",
-      );
-
     } catch (e) {
       print('Erreur lors de la gestion de la réaction: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erreur lors de la réaction: $e')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erreur lors de la réaction: $e')),
+        );
+      }
     }
   }
 
-  Future<List<SouvenirModel>> _getSouvenirsForJournee(JourneeModel journee) async {
+  List<SouvenirModel> _getSouvenirsForJournee(JourneeModel journee) {
     try {
-      final journeeDate = DateTime(journee.date.year, journee.date.month, journee.date.day);
+      final journeeDate = DateTime(
+        journee.date.year,
+        journee.date.month,
+        journee.date.day,
+      );
       return _mySouvenirs.where((souvenir) {
-        final souvenirDate = DateTime(souvenir.date.year, souvenir.date.month, souvenir.date.day);
+        final souvenirDate = DateTime(
+          souvenir.date.year,
+          souvenir.date.month,
+          souvenir.date.day,
+        );
         return souvenirDate.isAtSameMomentAs(journeeDate);
       }).toList();
-
     } catch (e) {
-      print('Erreur lors de la récupération des souvenirs pour la journée : $e');
+      print(
+        'Erreur lors de la récupération des souvenirs pour la journée : $e',
+      );
       return [];
     }
   }
+
+  void _showSouvenirDetailDialog(SouvenirModel souvenir) {
+    final bool isMySouvenir =
+        souvenir.userId == FirebaseAuth.instance.currentUser?.uid;
+    final isDark = appBrightnessNotifier.value == Brightness.dark;
+
+    final Map<SouvenirQualite, Map<String, dynamic>> qualiteInfo = {
+      SouvenirQualite.nostalgie: {
+        'label': 'Nostalgie',
+        'icon': Icons.history,
+        'color': Colors.purple,
+      },
+      SouvenirQualite.jamaisOublie: {
+        'label': 'Jamais oublié',
+        'icon': Icons.favorite,
+        'color': Colors.red,
+      },
+      SouvenirQualite.bonheur: {
+        'label': 'Bonheur',
+        'icon': Icons.wb_sunny_rounded,
+        'color': Colors.orange,
+      },
+    };
+    final qInfo = qualiteInfo[souvenir.qualite]!;
+
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: '',
+      barrierColor: Colors.transparent,
+      transitionDuration: const Duration(milliseconds: 280),
+      transitionBuilder: (ctx, anim1, anim2, child) {
+        return FadeTransition(
+          opacity: CurvedAnimation(parent: anim1, curve: Curves.easeOut),
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.90, end: 1.0).animate(
+              CurvedAnimation(parent: anim1, curve: Curves.easeOutBack),
+            ),
+            child: child,
+          ),
+        );
+      },
+      pageBuilder: (ctx, anim1, anim2) {
+        return BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 14.0, sigmaY: 14.0),
+          child: Material(
+            color: Colors.black.withValues(alpha: 0.55),
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 24,
+                ),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight: MediaQuery.of(context).size.height * 0.85,
+                      maxWidth: MediaQuery.of(context).size.width,
+                    ),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.grey.shade900 : Colors.white,
+                        borderRadius: BorderRadius.circular(24),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Colors.black38,
+                            blurRadius: 24,
+                            spreadRadius: 2,
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // ── Header ──
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 16, 8, 0),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    '${souvenir.date.day.toString().padLeft(2, '0')}'
+                                    '/${souvenir.date.month.toString().padLeft(2, '0')}'
+                                    '/${souvenir.date.year}',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color:
+                                          isDark
+                                              ? Colors.white
+                                              : Colors.black87,
+                                    ),
+                                  ),
+                                ),
+                                if (isMySouvenir)
+                                  IconButton(
+                                    tooltip: 'Modifier',
+                                    icon: Icon(
+                                      Icons.edit_outlined,
+                                      color:
+                                          isDark
+                                              ? Colors.blue.shade300
+                                              : Colors.blue,
+                                    ),
+                                    onPressed: () {
+                                      Navigator.of(ctx).pop();
+                                      _modifierSouvenir(souvenir);
+                                    },
+                                  ),
+                                IconButton(
+                                  icon: Icon(
+                                    Icons.close,
+                                    color:
+                                        isDark
+                                            ? Colors.grey.shade400
+                                            : Colors.grey.shade600,
+                                  ),
+                                  onPressed: () => Navigator.of(ctx).pop(),
+                                ),
+                              ],
+                            ),
+                          ),
+                          // ── Content ──
+                          Flexible(
+                            child: SingleChildScrollView(
+                              padding: const EdgeInsets.fromLTRB(
+                                20,
+                                10,
+                                20,
+                                20,
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  // Qualité badge
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        qInfo['icon'] as IconData,
+                                        color: qInfo['color'] as Color,
+                                        size: 20,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        qInfo['label'] as String,
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          color: qInfo['color'] as Color,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Text(
+                                    souvenir.texte,
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      height: 1.65,
+                                      color:
+                                          isDark
+                                              ? Colors.grey.shade100
+                                              : Colors.black87,
+                                    ),
+                                  ),
+
+                                  if (souvenir.photoUrls.isNotEmpty) ...[
+                                    const SizedBox(height: 14),
+                                    SizedBox(
+                                      height: 120,
+                                      child: ListView.builder(
+                                        scrollDirection: Axis.horizontal,
+                                        itemCount: souvenir.photoUrls.length,
+                                        itemBuilder:
+                                            (_, i) => Padding(
+                                              padding: const EdgeInsets.only(
+                                                right: 8,
+                                              ),
+                                              child: ClipRRect(
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                                child: Image.network(
+                                                  souvenir.photoUrls[i],
+                                                  width: 120,
+                                                  height: 120,
+                                                  fit: BoxFit.cover,
+                                                ),
+                                              ),
+                                            ),
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   void _modifierSouvenir(SouvenirModel souvenir) async {
     bool canModify = await _canModify('souvenirs', souvenir.id);
 
@@ -5642,6 +8570,224 @@ class HomePageState extends State<HomePage>
     return false;
   }
 
+  void _showJourneeDetailDialog(JourneeModel journee) {
+    final bool isMyJournee =
+        journee.userId == FirebaseAuth.instance.currentUser?.uid;
+    final isDark = appBrightnessNotifier.value == Brightness.dark;
+
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: '',
+      barrierColor: Colors.transparent,
+      transitionDuration: const Duration(milliseconds: 280),
+      transitionBuilder: (ctx, anim1, anim2, child) {
+        return FadeTransition(
+          opacity: CurvedAnimation(parent: anim1, curve: Curves.easeOut),
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.90, end: 1.0).animate(
+              CurvedAnimation(parent: anim1, curve: Curves.easeOutBack),
+            ),
+            child: child,
+          ),
+        );
+      },
+      pageBuilder: (ctx, anim1, anim2) {
+        return BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 14.0, sigmaY: 14.0),
+          child: Material(
+            color: Colors.black.withValues(alpha: 0.55),
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 24,
+                ),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight: MediaQuery.of(context).size.height * 0.85,
+                      maxWidth: MediaQuery.of(context).size.width,
+                    ),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.grey.shade900 : Colors.white,
+                        borderRadius: BorderRadius.circular(24),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Colors.black38,
+                            blurRadius: 24,
+                            spreadRadius: 2,
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // ── Header ──
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 16, 8, 0),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    '${journee.date.day.toString().padLeft(2, '0')}/'
+                                    '${journee.date.month.toString().padLeft(2, '0')}/'
+                                    '${journee.date.year}',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color:
+                                          isDark
+                                              ? Colors.white
+                                              : Colors.black87,
+                                    ),
+                                  ),
+                                ),
+                                if (isMyJournee)
+                                  IconButton(
+                                    tooltip: 'Modifier',
+                                    icon: Icon(
+                                      Icons.edit_outlined,
+                                      color:
+                                          isDark
+                                              ? Colors.blue.shade300
+                                              : Colors.blue,
+                                    ),
+                                    onPressed: () {
+                                      Navigator.of(ctx).pop();
+                                      _modifierJournee(journee);
+                                    },
+                                  ),
+                                IconButton(
+                                  icon: Icon(
+                                    Icons.close,
+                                    color:
+                                        isDark
+                                            ? Colors.grey.shade400
+                                            : Colors.grey.shade600,
+                                  ),
+                                  onPressed: () => Navigator.of(ctx).pop(),
+                                ),
+                              ],
+                            ),
+                          ),
+                          // ── Content ──
+                          Flexible(
+                            child: SingleChildScrollView(
+                              padding: const EdgeInsets.fromLTRB(
+                                20,
+                                10,
+                                20,
+                                20,
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  if (journee.emoji != null) ...[
+                                    Text(
+                                      journee.emoji!,
+                                      style: const TextStyle(fontSize: 36),
+                                    ),
+                                    const SizedBox(height: 8),
+                                  ],
+                                  Text(
+                                    journee.texte1 ?? '',
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      height: 1.65,
+                                      color:
+                                          isDark
+                                              ? Colors.grey.shade100
+                                              : Colors.black87,
+                                    ),
+                                  ),
+                                  if (journee.note != null) ...[
+                                    const SizedBox(height: 14),
+                                    Row(
+                                      children: [
+                                        const Icon(
+                                          Icons.star_rounded,
+                                          color: Colors.amber,
+                                          size: 20,
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          'Note : ${journee.note}',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.blueGrey.shade700,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                  if (journee.photoUrls.isNotEmpty) ...[
+                                    const SizedBox(height: 14),
+                                    SizedBox(
+                                      height: 120,
+                                      child: ListView.builder(
+                                        scrollDirection: Axis.horizontal,
+                                        itemCount: journee.photoUrls.length,
+                                        itemBuilder:
+                                            (_, i) => Padding(
+                                              padding: const EdgeInsets.only(
+                                                right: 8,
+                                              ),
+                                              child: ClipRRect(
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                                child: Image.network(
+                                                  journee.photoUrls[i],
+                                                  width: 120,
+                                                  height: 120,
+                                                  fit: BoxFit.cover,
+                                                ),
+                                              ),
+                                            ),
+                                      ),
+                                    ),
+                                  ],
+                                  if ((journee.motsCles ?? []).isNotEmpty) ...[
+                                    const SizedBox(height: 14),
+                                    Wrap(
+                                      spacing: 6,
+                                      runSpacing: 4,
+                                      children:
+                                          (journee.motsCles ?? [])
+                                              .map(
+                                                (k) => Chip(
+                                                  label: Text(
+                                                    k,
+                                                    style: const TextStyle(
+                                                      fontSize: 11,
+                                                    ),
+                                                  ),
+                                                  visualDensity:
+                                                      VisualDensity.compact,
+                                                  padding: EdgeInsets.zero,
+                                                ),
+                                              )
+                                              .toList(),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   void _modifierJournee(JourneeModel journee) async {
     bool canModify = await _canModify('journees', journee.id);
 
@@ -5683,222 +8829,260 @@ class HomePageState extends State<HomePage>
     int start = 0;
     for (Match match in regex.allMatches(text)) {
       if (start < match.start) {
-        spans.add(TextSpan(text: text.substring(start, match.start)));
+        spans.add(
+          TextSpan(text: text.substring(start, match.start), style: style),
+        );
       }
-      spans.add(TextSpan(
-        text: '*',
-        style: TextStyle(
-          color: Colors.transparent,
-          shadows: [
-            Shadow(
-              blurRadius: 10.0,
-              color: Colors.black.withOpacity(0.9),
-              offset: const Offset(0, 0),
-            ),
-          ],
+      spans.add(
+        TextSpan(
+          text: '*',
+          style: (style ?? const TextStyle()).copyWith(
+            color: Colors.transparent,
+            shadows: [
+              Shadow(
+                blurRadius: 10.0,
+                color: (style?.color ?? Colors.black).withValues(alpha: 0.9),
+                offset: const Offset(0, 0),
+              ),
+            ],
+          ),
         ),
-      ));
+      );
       start = match.end;
     }
     if (start < text.length) {
-      spans.add(TextSpan(text: text.substring(start)));
+      spans.add(TextSpan(text: text.substring(start), style: style));
     }
 
     return RichText(
       text: TextSpan(
-        style: const TextStyle(
-            fontSize: 18,
-            height: 1.5,
-            color: Colors.black),
+        style:
+            style ??
+            const TextStyle(fontSize: 18, height: 1.5, color: Colors.black),
         children: spans,
       ),
     );
   }
 
-  Widget _buildSouvenirCard(SouvenirModel souvenir, {bool showRepublishButton = false, required bool hasUserPostedToday}) {
-    List<JourneeModel> journeesDuSouvenir = _myJournees.where((journee) {
-      return journee.date.year == souvenir.date.year &&
-          journee.date.month == souvenir.date.month &&
-          journee.date.day == souvenir.date.day;
-    }).toList();
-
-    ValueNotifier<bool> isJourneeVisible = ValueNotifier<bool>(false);
-    final currentUser = FirebaseAuth.instance.currentUser;
-    final isOwner = souvenir.userId == currentUser?.uid;
-
+  Widget _buildSouvenirCard(
+    SouvenirModel souvenir, {
+    bool showRepublishButton = false,
+    required bool hasUserPostedToday,
+  }) {
     return FutureBuilder<DocumentSnapshot>(
-      future: _firestore
-          .collection('users')
-          .doc(FirebaseAuth.instance.currentUser?.uid)
-          .get(),
+      future:
+          _firestore
+              .collection('users')
+              .doc(FirebaseAuth.instance.currentUser?.uid)
+              .get(),
       builder: (context, userSnapshot) {
+        final isDark = appBrightnessNotifier.value == Brightness.dark;
         Map<String, dynamic> personalizationPreferences =
             (userSnapshot.data?.data()
-            as Map<String, dynamic>?)?['personalizationPreferences'] ??
-                {'cardColor': 'default'};
+                as Map<String, dynamic>?)?['personalizationPreferences'] ??
+            {};
 
-        Color cardColor = Colors.blue.shade100;
-        switch (personalizationPreferences['cardColor']) {
-          case 'noir': cardColor = Colors.black; break;
-          case 'bleu': cardColor = Colors.blue.shade300; break;
-          case 'rouge': cardColor = Colors.red.shade300; break;
-          case 'vert': cardColor = Colors.green.shade300; break;
-          default: cardColor = Colors.blue.shade100;
+        bool forceGlobal =
+            personalizationPreferences['forceGlobalSouvenirColor'] ?? false;
+        String colorPref =
+            forceGlobal
+                ? (personalizationPreferences['cardColor'] ?? 'bleu')
+                : (souvenir.cardColor ??
+                    personalizationPreferences['cardColor'] ??
+                    'bleu');
+
+        Color cardColor;
+        switch (colorPref) {
+          case 'noir':
+            cardColor = isDark ? Colors.grey.shade900 : Colors.black87;
+            break;
+          case 'rouge':
+            cardColor = isDark ? Colors.red.shade900 : Colors.red.shade300;
+            break;
+          case 'vert':
+            cardColor = isDark ? Colors.green.shade900 : Colors.green.shade300;
+            break;
+          case 'orange':
+            cardColor =
+                isDark ? Colors.orange.shade900 : Colors.orange.shade300;
+            break;
+          case 'jaune':
+            cardColor =
+                isDark ? Colors.yellow.shade900 : Colors.yellow.shade600;
+            break;
+          case 'violet':
+            cardColor =
+                isDark ? Colors.purple.shade900 : Colors.purple.shade300;
+            break;
+          case 'rose':
+            cardColor = isDark ? Colors.pink.shade900 : Colors.pink.shade300;
+            break;
+          case 'blanc':
+            cardColor = isDark ? Colors.grey.shade300 : Colors.white;
+            break;
+          case 'bleu':
+          default:
+            cardColor = isDark ? Colors.blue.shade900 : Colors.blue.shade300;
+            break;
         }
 
-        return Card(
-          margin: EdgeInsets.zero,
-          elevation: 5,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(15),
-            side: souvenir.isRepost
-                ? const BorderSide(color: Colors.grey, width: 2.0)
-                : BorderSide.none,
-          ),
-          child: Container(
-            decoration: BoxDecoration(
+        final Color cardEndColor = isDark ? Colors.grey.shade900 : Colors.white;
+        final Color mainTextColor =
+            cardColor.computeLuminance() > 0.5 ? Colors.black87 : Colors.white;
+        final Color secondaryTextColor = mainTextColor.withOpacity(0.7);
+
+        return GestureDetector(
+          onTap: () => _showSouvenirDetailDialog(souvenir),
+          child: Card(
+            margin: EdgeInsets.zero,
+            elevation: 5,
+            shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(15),
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  cardColor,
-                  Colors.white,
+              side:
+                  souvenir.isRepost
+                      ? const BorderSide(color: Colors.grey, width: 2.0)
+                      : BorderSide.none,
+            ),
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(15),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [cardColor, cardEndColor],
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: cardColor.withOpacity(0.3),
+                    spreadRadius: 1,
+                    blurRadius: 5,
+                    offset: const Offset(0, 3),
+                  ),
                 ],
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.blue.withOpacity(0.1),
-                  spreadRadius: 1,
-                  blurRadius: 5,
-                  offset: const Offset(0, 3),
-                ),
-              ],
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(12.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (souvenir.isRepost)
-                    Text(
-                      'De ${souvenir.repostedFromUserName ?? 'un ami'}',
-                      style: const TextStyle(fontSize: 10, color: Colors.grey),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-
-                  Text(
-                    souvenir.texte,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      height: 1.4,
-                      color: Colors.black87,
-                      fontWeight: FontWeight.w500,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-
-                  if (souvenir.photoUrls.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      height: 50,
-                      child: ListView.builder(
-                        scrollDirection: Axis.horizontal,
-                        itemCount: souvenir.photoUrls.length,
-                        itemBuilder: (context, index) {
-                          final imageUrl = souvenir.photoUrls[index];
-                          return Padding(
-                            padding: const EdgeInsets.only(right: 6.0),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(8.0),
-                              child: Image.network(
-                                imageUrl,
-                                width: 50,
-                                height: 50,
-                                fit: BoxFit.cover,
-                                loadingBuilder: (context, child, loadingProgress) {
-                                  if (loadingProgress == null) return child;
-                                  return Container(
-                                    width: 50, height: 50, color: Colors.grey[200],
-                                    child: const Center(child: CircularProgressIndicator(strokeWidth: 2.0)),
-                                  );
-                                },
-                                errorBuilder: (context, error, stackTrace) {
-                                  print('[UI] ERREUR de chargement de l\'image URL: $imageUrl, Erreur: $error');
-                                  return Container(
-                                    width: 50, height: 50, color: Colors.grey[200],
-                                    child: const Icon(Icons.broken_image, size: 24, color: Colors.grey),
-                                  );
-                                },
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ],
-
-                  const Spacer(),
-
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
+              child: Padding(
+                padding: const EdgeInsets.all(10.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (souvenir.isRepost)
                       Text(
-                        _formatDate(souvenir.date),
-                        style: const TextStyle(
-                          color: Colors.grey,
-                          fontStyle: FontStyle.italic,
+                        'De ${souvenir.repostedFromUserName ?? 'un ami'}',
+                        style: TextStyle(
                           fontSize: 10,
+                          color: secondaryTextColor,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                      ),
+                    if (souvenir.photoUrls.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(10.0),
+                        child: Image.network(
+                          souvenir.photoUrls.first,
+                          height: 42,
+                          width: double.infinity,
+                          fit: BoxFit.cover,
+                          loadingBuilder: (context, child, loadingProgress) {
+                            if (loadingProgress == null) return child;
+                            return Container(
+                              height: 42,
+                              color: Colors.grey[200],
+                              child: const Center(
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.0,
+                                ),
+                              ),
+                            );
+                          },
+                          errorBuilder: (context, error, stackTrace) {
+                            return Container(
+                              height: 42,
+                              color: Colors.grey[200],
+                              child: const Icon(
+                                Icons.broken_image,
+                                size: 22,
+                                color: Colors.grey,
+                              ),
+                            );
+                          },
                         ),
                       ),
-                      Wrap(
-                        spacing: 4,
-                        runSpacing: 2,
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: _getQualiteColor(souvenir.qualite)
-                                  .withOpacity(0.15),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Text(
-                              _getQualiteLabel(souvenir.qualite),
-                              style: TextStyle(
-                                color: _getQualiteColor(souvenir.qualite),
-                                fontSize: 9,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: souvenir.estPublic
-                                  ? Colors.green.shade50
-                                  : Colors.red.shade50,
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Text(
-                              souvenir.estPublic ? 'Public' : 'Privé',
-                              style: TextStyle(
-                                color: souvenir.estPublic
-                                    ? Colors.green
-                                    : Colors.red,
-                                fontSize: 9,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
+                      const SizedBox(height: 6),
                     ],
-                  ),
-                ],
+                    Text(
+                      souvenir.texte,
+                      style: TextStyle(
+                        fontSize: 13,
+                        height: 1.25,
+                        color: mainTextColor,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      maxLines: souvenir.photoUrls.isNotEmpty ? 2 : 3,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const Spacer(),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Flexible(
+                          child: Wrap(
+                            spacing: 4,
+                            runSpacing: 2,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: _getQualiteColor(
+                                    souvenir.qualite,
+                                  ).withOpacity(0.15),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  _getQualiteLabel(souvenir.qualite),
+                                  style: TextStyle(
+                                    color: _getQualiteColor(souvenir.qualite),
+                                    fontSize: 8,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color:
+                                      souvenir.estPublic
+                                          ? Colors.green.shade50
+                                          : Colors.red.shade50,
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  souvenir.estPublic ? 'Public' : 'Privé',
+                                  style: TextStyle(
+                                    color:
+                                        souvenir.estPublic
+                                            ? Colors.green
+                                            : Colors.red,
+                                    fontSize: 8,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -5909,17 +9093,23 @@ class HomePageState extends State<HomePage>
 
   String _getQualiteLabel(sm.SouvenirQualite qualite) {
     switch (qualite) {
-      case sm.SouvenirQualite.nostalgie: return "Nostalgie";
-      case sm.SouvenirQualite.jamaisOublie: return "Jamais Oublié";
-      case sm.SouvenirQualite.bonheur: return "Bonheur";
+      case sm.SouvenirQualite.nostalgie:
+        return "Nostalgie";
+      case sm.SouvenirQualite.jamaisOublie:
+        return "Jamais Oublié";
+      case sm.SouvenirQualite.bonheur:
+        return "Bonheur";
     }
   }
 
   Color _getQualiteColor(sm.SouvenirQualite qualite) {
     switch (qualite) {
-      case sm.SouvenirQualite.nostalgie: return Colors.purple;
-      case sm.SouvenirQualite.jamaisOublie: return Colors.blue;
-      case sm.SouvenirQualite.bonheur: return Colors.green;
+      case sm.SouvenirQualite.nostalgie:
+        return Colors.purple;
+      case sm.SouvenirQualite.jamaisOublie:
+        return Colors.blue;
+      case sm.SouvenirQualite.bonheur:
+        return Colors.green;
     }
   }
 
@@ -5928,16 +9118,21 @@ class HomePageState extends State<HomePage>
     if (currentUser == null) return;
 
     try {
-      DocumentSnapshot userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(currentUser.uid)
-          .get();
+      DocumentSnapshot userDoc =
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(currentUser.uid)
+              .get();
 
-      int qualiteDeVieActuelle = userDoc.exists
-          ? (userDoc.data() as Map<String, dynamic>)['qualiteDeVieActuelle'] ?? 50
-          : 50;
+      int qualiteDeVieActuelle =
+          userDoc.exists
+              ? (userDoc.data()
+                      as Map<String, dynamic>)['qualiteDeVieActuelle'] ??
+                  50
+              : 50;
 
-      int nouvelleQualiteDeVie = ((qualiteDeVieActuelle * 2 - souvenir.noteQualite) / 3).round();
+      int nouvelleQualiteDeVie =
+          ((qualiteDeVieActuelle * 2 - souvenir.noteQualite) / 3).round();
       nouvelleQualiteDeVie = nouvelleQualiteDeVie.clamp(0, 100);
 
       await FirebaseFirestore.instance
@@ -5948,9 +9143,7 @@ class HomePageState extends State<HomePage>
       await FirebaseFirestore.instance
           .collection('users')
           .doc(currentUser.uid)
-          .update({
-        'qualiteDeVieActuelle': nouvelleQualiteDeVie,
-      });
+          .update({'qualiteDeVieActuelle': nouvelleQualiteDeVie});
 
       setState(() {
         _souvenirs.remove(souvenir);
@@ -5967,182 +9160,212 @@ class HomePageState extends State<HomePage>
   }
 
   bool _hasPostedToday() {
-    return _myJournees.any((journee) =>
-    journee.date.year == _today.year &&
-        journee.date.month == _today.month &&
-        journee.date.day == _today.day);
+    return _myJournees.any(
+      (journee) =>
+          journee.date.year == _today.year &&
+          journee.date.month == _today.month &&
+          journee.date.day == _today.day,
+    );
   }
 
   bool _hasPostedTodayWithComment() {
-    return _myJournees.any((journee) =>
-    journee.date.year == _today.year &&
-        journee.date.month == _today.month &&
-        journee.date.day == _today.day &&
-        journee.commentaire != null &&
-        journee.commentaire!.isNotEmpty);
+    return _myJournees.any(
+      (journee) =>
+          journee.date.year == _today.year &&
+          journee.date.month == _today.month &&
+          journee.date.day == _today.day &&
+          journee.commentaire != null &&
+          journee.commentaire!.isNotEmpty,
+    );
   }
 
   Future<double> _calculateSimilarity(String text1, String text2) async {
-    if (DEEPSEEK_API_KEY == 'VOTRE_CLÉ_API_DEEPSEEK') {
-    }
-    const String url = 'https://api.deepseek.com/v1/chat/completions';
+    if (DEEPSEEK_API_KEY == 'VOTRE_CLÉ_API_DEEPSEEK') return 0.0;
+    const String url = 'https://api.deepinfra.com/v1/openai/chat/completions';
 
     if (text1.trim().isEmpty || text2.trim().isEmpty) return 0.0;
 
     try {
-      final response = await http.post(
-        Uri.parse(url),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $DEEPSEEK_API_KEY',
-        },
-        body: jsonEncode({
-          'model': 'deepseek-chat',
-          'messages': [
-            {
-              'role': 'user',
-              'content':
-              '''Compare les deux textes suivants et donne un pourcentage de similarité basé sur leur contenu, leur ton et leurs thèmes principaux. Réponds uniquement avec un nombre entier entre 0 et 100 suivi de "/100", par exemple "75/100".
+      final response = await http
+          .post(
+            Uri.parse(url),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $DEEPSEEK_API_KEY',
+            },
+            body: jsonEncode({
+              'model': await resolveAiModel(isVip: _isVip),
+              'messages': [
+                {
+                  'role': 'user',
+                  'content':
+                      '''Compare les deux textes suivants et donne un pourcentage de similarité basé sur leur contenu, leur ton et leurs thèmes principaux.
+              Tu DOIS répondre STRICTEMENT et UNIQUEMENT avec un objet JSON valide contenant une seule clé "similarite" avec un nombre entier entre 0 et 100. Ne mets AUCUN texte avant ou après.
+              Exemple de réponse attendue: {"similarite": 75}
 
-                  Texte 1: $text1
-                  Texte 2: $text2'''
-            }
-          ],
-          'max_tokens': 50,
-        }),
-      );
+              Texte 1: $text1
+              Texte 2: $text2''',
+                },
+              ],
+              'max_tokens': 50,
+            }),
+          )
+          .timeout(
+            const Duration(seconds: 15),
+          ); // <-- TIMEOUT AJOUTÉ (15 sec max)
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        final content = data['choices']?[0]['message']['content']?.toString() ?? '';
+        String content =
+            data['choices']?[0]['message']['content']?.toString().trim() ?? '';
 
-        if (content.isEmpty) {
-          print('Avertissement: Réponse vide de DeepSeek pour le calcul de similarité.');
-          return 0.0;
+        if (content.isEmpty) return 0.0;
+
+        // Nettoyage au cas où l'IA rajoute des balises Markdown (ex: ```json ... ```)
+        content =
+            content.replaceAll(RegExp(r'^```(?:json)?\s*|\s*```$'), '').trim();
+
+        try {
+          final parsed = jsonDecode(content);
+          if (parsed is Map && parsed.containsKey('similarite')) {
+            return (parsed['similarite'] as num).toDouble();
+          }
+        } catch (e) {
+          print(
+            'Erreur parsing JSON similarité: $e. Fallback Regex sur le contenu: $content',
+          );
+          // Sécurité supplémentaire : Fallback avec Regex si l'IA n'a pas respecté le JSON
+          final match = RegExp(r'"similarite"\s*:\s*(\d+)').firstMatch(content);
+          if (match != null && match.group(1) != null) {
+            return double.parse(match.group(1)!);
+          }
         }
-
-        final match = RegExp(r'(\d+)\s*/\s*100').firstMatch(content);
-        if (match != null && match.group(1) != null) {
-          return double.parse(match.group(1)!);
-        }
-
-        final numberMatch = RegExp(r'\b(\d+)\b').firstMatch(content);
-        if (numberMatch != null && numberMatch.group(1) != null) {
-          return double.parse(numberMatch.group(1)!);
-        }
-
-        print('Avertissement: Format de réponse de similarité inattendu: "$content"');
         return 0.0;
       } else {
-        print('Erreur API DeepSeek pour similarité: ${response.statusCode} - ${response.body}');
+        print(
+          'Erreur API DeepSeek pour similarité: ${response.statusCode} - ${response.body}',
+        );
         return 0.0;
       }
+    } on TimeoutException {
+      print('Erreur : Timeout lors du calcul de similarité (API trop longue).');
+      return 0.0;
     } catch (e, stacktrace) {
       print('Erreur lors du calcul de la similarité : $e\n$stacktrace');
       return 0.0;
     }
   }
-  Future<Map<JourneeModel, double>> _findSimilarJournees(JourneeModel todayJournee) async {
+
+  Future<Map<JourneeModel, double>> _findSimilarJournees(
+    JourneeModel todayJournee, {
+    DateTime? searchAfter,
+  }) async {
     print('--- DÉBUT DE LA RECHERCHE DE JOURNÉES SIMILAIRES ---');
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null || todayJournee.id == null) {
-      print('[ERREUR] Utilisateur non connecté ou ID de journée manquant.');
-      return {};
-    }
+    if (user == null || todayJournee.id == null) return {};
 
-    final todayDocSnapshot = await _firestore.collection('journees').doc(todayJournee.id).get();
-    if (!todayDocSnapshot.exists) {
-      print('[ERREUR] Le document de la journée de référence (ID: ${todayJournee.id}) n\'a pas été trouvé.');
-      return {};
-    }
+    final todayDocSnapshot =
+        await _firestore.collection('journees').doc(todayJournee.id).get();
+    if (!todayDocSnapshot.exists) return {};
+
     final todayData = todayDocSnapshot.data() as Map<String, dynamic>? ?? {};
-    final keywordsList = todayData['motsCles'] is List ? List.from(todayData['motsCles']) : [];
-    final todayKeywords = keywordsList.map((k) => k.toString().toLowerCase()).toSet();
-
+    final keywordsList =
+        todayData['motsCles'] is List ? List.from(todayData['motsCles']) : [];
+    final todayKeywords =
+        keywordsList.map((k) => k.toString().toLowerCase()).toSet();
     final todayText = todayJournee.texte1 ?? todayJournee.commentaire ?? '';
 
-    print('Journée de référence (ID: ${todayJournee.id}): "${todayText.substring(0, min(todayText.length, 50))}..."');
-    print('Mots-clés de référence: $todayKeywords');
-
+    // Gestion propre de l'absence de mots-clés
     if (todayKeywords.isEmpty) {
-      print('[FIN] La journée de référence n\'a pas de mots-clés. Analyse annulée pour économiser les ressources.');
-      return {};
+      print('[FIN] La journée n\'a pas encore de mots-clés.');
+      throw Exception(
+        'L\'IA est encore en train d\'analyser les mots-clés de cette journée. Veuillez réessayer dans quelques instants.',
+      );
     }
 
-    if (todayText.trim().isEmpty) {
-      print('[AVERTISSEMENT] Le texte de la journée de référence est vide.');
-    }
+    final allJourneesQuery =
+        await _firestore
+            .collection('journees')
+            .where('userId', isEqualTo: user.uid)
+            .get();
 
-    final allJourneesQuery = await _firestore
-        .collection('journees')
-        .where('userId', isEqualTo: user.uid)
-        .get();
-    print('Nombre total de journées de l\'utilisateur à analyser: ${allJourneesQuery.docs.length}');
-
-    final List<Future<MapEntry<JourneeModel, double>?>> similarityFutures = [];
+    // 1. PHASE DE PRÉ-FILTRAGE LOCAL (Ultra rapide, gratuit)
+    List<JourneeModel> candidates = [];
 
     for (var doc in allJourneesQuery.docs) {
       if (doc.id == todayJournee.id) continue;
 
       final journee = JourneeModel.fromFirestore(doc);
-
       final journeeData = doc.data() as Map<String, dynamic>? ?? {};
-      final otherKeywordsList = journeeData['motsCles'] is List ? List.from(journeeData['motsCles']) : [];
-      final journeeKeywords = otherKeywordsList.map((k) => k.toString().toLowerCase()).toSet();
+      final otherKeywordsList =
+          journeeData['motsCles'] is List
+              ? List.from(journeeData['motsCles'])
+              : [];
+      final journeeKeywords =
+          otherKeywordsList.map((k) => k.toString().toLowerCase()).toSet();
 
       final journeeText = journee.texte1 ?? journee.commentaire ?? '';
 
       if (journeeText.isNotEmpty) {
-        print('\n[ANALYSE] Comparaison avec la journée du ${DateFormat('yyyy-MM-dd').format(journee.date)} (ID: ${journee.id})');
-        print('  -> Mots-clés: $journeeKeywords');
-
-        final hasCommonKeyword = todayKeywords.any((keyword) => journeeKeywords.contains(keyword));
-
+        final hasCommonKeyword = todayKeywords.any(
+          (keyword) => journeeKeywords.contains(keyword),
+        );
         if (hasCommonKeyword) {
-          print('  -> [OK] Mot(s)-clé(s) commun(s) trouvé(s). Lancement du calcul de similarité sémantique.');
-          similarityFutures.add(
-            _calculateSimilarity(todayText, journeeText).then((similarity) {
-              print('  -> [RÉSULTAT] Similarité sémantique pour la journée (ID: ${journee.id}) : ${similarity.toStringAsFixed(1)}%');
-              if (similarity > 30) {
-                print('  -> [CONSERVÉ] Seuil de similarité dépassé. Ajout à la liste.');
-                return MapEntry(journee, similarity);
-              } else {
-                print('  -> [IGNORÉ] Seuil de similarité non atteint.');
-                return null;
-              }
-            }),
-          );
-        } else {
-          print('  -> [IGNORÉ] Pas de mot-clé commun. Le calcul de similarité coûteux est évité.');
+          candidates.add(journee);
         }
-      } else {
-        print('\n[IGNORÉ] Journée du ${DateFormat('yyyy-MM-dd').format(journee.date)} (ID: ${journee.id}) car son texte est vide.');
       }
     }
 
-    if (similarityFutures.isEmpty) {
-      print('[FIN] Aucune journée éligible avec des mots-clés communs trouvée.');
+    if (candidates.isEmpty) {
+      print(
+        '[FIN] Aucune journée n\'a de mots-clés en commun avec aujourd\'hui.',
+      );
       return {};
     }
 
-    print('\nAttente de tous les calculs de similarité...');
-    final List<MapEntry<JourneeModel, double>?> results = await Future.wait(similarityFutures);
+    print(
+      '\n[API] Lancement des calculs IA pour ${candidates.length} candidats...',
+    );
 
-    final Map<JourneeModel, double> similarJournees = {
-      for (var entry in results) if (entry != null) entry.key: entry.value
-    };
+    // 2. PHASE D'APPEL IA PAR LOTS (BATCH) POUR ÉVITER LE RATE LIMIT (Erreur 429)
+    List<MapEntry<JourneeModel, double>> finalResults = [];
+    const int chunkSize =
+        5; // On ne lance que 5 requêtes IA en même temps maximum.
 
-    final sortedEntries = similarJournees.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
+    for (int i = 0; i < candidates.length; i += chunkSize) {
+      int end =
+          (i + chunkSize < candidates.length)
+              ? i + chunkSize
+              : candidates.length;
+      List<JourneeModel> chunk = candidates.sublist(i, end);
 
-    print('--- FIN DE LA RECHERCHE ---');
-    print('Nombre de journées similaires trouvées au-dessus du seuil: ${sortedEntries.length}');
-    for (var entry in sortedEntries) {
-      print('  - ${DateFormat('yyyy-MM-dd').format(entry.key.date)}: ${entry.value.toStringAsFixed(1)}%');
+      print(
+        ' -> Traitement du lot ${i ~/ chunkSize + 1} (${chunk.length} requêtes)...',
+      );
+
+      // Création des futures pour ce lot
+      var futures = chunk.map((journee) async {
+        final journeeText = journee.texte1 ?? journee.commentaire ?? '';
+        double similarity = await _calculateSimilarity(todayText, journeeText);
+        return MapEntry(journee, similarity);
+      });
+
+      // On attend que les 5 requêtes de ce lot soient terminées avant de passer au lot suivant
+      var chunkResults = await Future.wait(futures);
+
+      // On filtre directement ceux qui dépassent le seuil (30%)
+      finalResults.addAll(chunkResults.where((entry) => entry.value > 30));
     }
 
-    return Map.fromEntries(sortedEntries);
+    // 3. TRI PAR POURCENTAGE LE PLUS ÉLEVÉ
+    finalResults.sort((a, b) => b.value.compareTo(a.value));
+
+    print(
+      '--- FIN DE LA RECHERCHE (${finalResults.length} résultats > 30%) ---',
+    );
+    return Map.fromEntries(finalResults);
   }
+
   void _showSimilarJourneesDialog() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
@@ -6153,20 +9376,30 @@ class HomePageState extends State<HomePage>
       return;
     }
 
-    final todayStart = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
+    final todayStart = DateTime(
+      DateTime.now().year,
+      DateTime.now().month,
+      DateTime.now().day,
+    );
     final todayEnd = todayStart.add(const Duration(days: 1));
-    final todayQuery = await _firestore
-        .collection('journees')
-        .where('userId', isEqualTo: user.uid)
-        .where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(todayStart))
-        .where('date', isLessThan: Timestamp.fromDate(todayEnd))
-        .limit(1)
-        .get();
+    final todayQuery =
+        await _firestore
+            .collection('journees')
+            .where('userId', isEqualTo: user.uid)
+            .where(
+              'date',
+              isGreaterThanOrEqualTo: Timestamp.fromDate(todayStart),
+            )
+            .where('date', isLessThan: Timestamp.fromDate(todayEnd))
+            .limit(1)
+            .get();
 
     if (todayQuery.docs.isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Vous n'avez pas encore posté de journée aujourd'hui.")),
+        const SnackBar(
+          content: Text("Vous n'avez pas encore posté de journée aujourd'hui."),
+        ),
       );
       return;
     }
@@ -6174,62 +9407,97 @@ class HomePageState extends State<HomePage>
     final todayJourneeDoc = todayQuery.docs.first;
     final todayJournee = JourneeModel.fromFirestore(todayJourneeDoc);
 
+    // Affichage du loader
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => const AlertDialog(
-        backgroundColor: Colors.white,
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.blue)),
-            SizedBox(height: 16),
-            Text("Recherche de journées similaires...", style: TextStyle(color: Colors.blue)),
-          ],
-        ),
-      ),
+      builder:
+          (context) => const AlertDialog(
+            backgroundColor: Colors.white,
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+                ),
+                SizedBox(height: 16),
+                Text(
+                  "Recherche de journées similaires...",
+                  style: TextStyle(
+                    color: Colors.blue,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                SizedBox(height: 8),
+                Text(
+                  "Cela peut prendre quelques secondes.",
+                  style: TextStyle(
+                    color: Colors.grey,
+                    fontSize: 12,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              ],
+            ),
+          ),
     );
 
     Map<JourneeModel, double> similarJournees = {};
+    String? errorMessage;
+
     try {
       similarJournees = await _findSimilarJournees(todayJournee);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("Une erreur est survenue: $e"),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      // Nettoyage du message d'erreur si c'est notre Exception personnalisée
+      errorMessage = e.toString().replaceAll('Exception: ', '');
     } finally {
       if (mounted) {
-        Navigator.pop(context);
+        Navigator.pop(context); // Fermer la boite de chargement
       }
     }
 
     if (!mounted) return;
 
+    // Si on a attrapé une erreur (ex: Pas encore de mots clés)
+    if (errorMessage != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(errorMessage), backgroundColor: Colors.orange),
+      );
+      return;
+    }
+
     if (similarJournees.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Aucune journée suffisamment similaire trouvée (basé sur les mots-clés).'),
+          content: Text(
+            'Aucune journée similaire trouvée (basé sur les mots-clés et l\'IA).',
+          ),
           backgroundColor: Colors.blue,
         ),
       );
       return;
     }
 
-    await FirebaseFirestore.instance.collection('journees').doc(todayJourneeDoc.id).set({
-      'similarJourneesCache': similarJournees.map((key, value) => MapEntry(key.id!, value)),
-      'lastSimilaritySearchDate': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+    // Mise en cache des résultats
+    await FirebaseFirestore.instance
+        .collection('journees')
+        .doc(todayJourneeDoc.id)
+        .set({
+          'similarJourneesCache': similarJournees.map(
+            (key, value) => MapEntry(key.id!, value),
+          ),
+          'lastSimilaritySearchDate': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
 
+    // Affichage de la pop-up avec les résultats
     showDialog(
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Vos Journées Similaires', style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
+          title: const Text(
+            'Vos Journées Similaires',
+            style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold),
+          ),
           content: SizedBox(
             width: double.maxFinite,
             child: SingleChildScrollView(
@@ -6237,23 +9505,48 @@ class HomePageState extends State<HomePage>
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text("Journée d'aujourd'hui :", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blueGrey)),
+                  const Text(
+                    "Journée d'aujourd'hui :",
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                      color: Colors.blueGrey,
+                    ),
+                  ),
                   Card(
                     elevation: 2,
                     margin: const EdgeInsets.symmetric(vertical: 8.0),
                     child: ListTile(
-                      title: Text(DateFormat('dd MMMM yyyy').format(todayJournee.date), style: const TextStyle(fontWeight: FontWeight.bold)),
-                      subtitle: Text(todayJournee.texte1 ?? '', maxLines: 2, overflow: TextOverflow.ellipsis),
+                      title: Text(
+                        DateFormat(
+                          'dd MMMM yyyy',
+                          'fr_FR',
+                        ).format(todayJournee.date),
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      subtitle: Text(
+                        todayJournee.texte1 ?? '',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ),
                   const Divider(height: 24, thickness: 1),
-                  const Text("Journées similaires trouvées :", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blueGrey)),
+                  const Text(
+                    "Journées similaires trouvées :",
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                      color: Colors.blueGrey,
+                    ),
+                  ),
                   const SizedBox(height: 8),
                   ListView.separated(
                     physics: const NeverScrollableScrollPhysics(),
                     shrinkWrap: true,
                     itemCount: similarJournees.length,
-                    separatorBuilder: (context, index) => const SizedBox(height: 10),
+                    separatorBuilder:
+                        (context, index) => const SizedBox(height: 10),
                     itemBuilder: (context, index) {
                       final entry = similarJournees.entries.elementAt(index);
                       final journee = entry.key;
@@ -6263,8 +9556,11 @@ class HomePageState extends State<HomePage>
                       return Card(
                         elevation: 2,
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            side: BorderSide(color: color.withOpacity(0.5), width: 1)
+                          borderRadius: BorderRadius.circular(12),
+                          side: BorderSide(
+                            color: color.withOpacity(0.5),
+                            width: 1,
+                          ),
                         ),
                         child: Padding(
                           padding: const EdgeInsets.all(12.0),
@@ -6272,8 +9568,14 @@ class HomePageState extends State<HomePage>
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                DateFormat('dd MMMM yyyy').format(journee.date),
-                                style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey),
+                                DateFormat(
+                                  'dd MMMM yyyy',
+                                  'fr_FR',
+                                ).format(journee.date),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.blueGrey,
+                                ),
                               ),
                               const SizedBox(height: 4),
                               Text(
@@ -6288,14 +9590,23 @@ class HomePageState extends State<HomePage>
                                     child: LinearProgressIndicator(
                                       value: similarity / 100,
                                       backgroundColor: color.withOpacity(0.2),
-                                      valueColor: AlwaysStoppedAnimation<Color>(color),
+                                      valueColor: AlwaysStoppedAnimation<Color>(
+                                        color,
+                                      ),
                                       minHeight: 6,
+                                      borderRadius: BorderRadius.circular(
+                                        10,
+                                      ), // Optionnel, esthétique
                                     ),
                                   ),
                                   const SizedBox(width: 8),
                                   Text(
                                     '${similarity.toStringAsFixed(0)}%',
-                                    style: TextStyle(fontWeight: FontWeight.bold, color: color, fontSize: 14),
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: color,
+                                      fontSize: 14,
+                                    ),
                                   ),
                                 ],
                               ),
@@ -6312,22 +9623,32 @@ class HomePageState extends State<HomePage>
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('Fermer', style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
+              child: const Text(
+                'Fermer',
+                style: TextStyle(
+                  color: Colors.blue,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
           ],
         );
       },
     );
   }
+
   Future<List<SouvenirModel>> _getSouvenirsForUser(String userId) async {
     try {
-      final snapshot = await _firestore
-          .collection('souvenirs')
-          .where('userId', isEqualTo: userId)
-          .where('estPublic', isEqualTo: true)
-          .get();
+      final snapshot =
+          await _firestore
+              .collection('souvenirs')
+              .where('userId', isEqualTo: userId)
+              .where('estPublic', isEqualTo: true)
+              .get();
 
-      return snapshot.docs.map((doc) => SouvenirModel.fromFirestore(doc)).toList();
+      return snapshot.docs
+          .map((doc) => SouvenirModel.fromFirestore(doc))
+          .toList();
     } catch (e) {
       print('Erreur lors de la récupération des souvenirs: $e');
       return [];
@@ -6347,24 +9668,67 @@ class HomePageState extends State<HomePage>
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: const Text('Filtrer mes journées', style: TextStyle(color: Colors.blue)),
+          title: const Text(
+            'Filtrer mes journées',
+            style: TextStyle(color: Colors.blue),
+          ),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _buildJourneeFilterOption(filterNotifier, 'tout', 'Toutes les journées'),
+                _buildJourneeFilterOption(
+                  filterNotifier,
+                  'tout',
+                  'Toutes les journées',
+                ),
                 const Divider(),
-                _buildJourneeFilterOption(filterNotifier, 'note_plus_80', 'Note > 80%'),
-                _buildJourneeFilterOption(filterNotifier, 'note_50_80', 'Note 50%-80%'),
-                _buildJourneeFilterOption(filterNotifier, 'note_moins_50', 'Note < 50%'),
-                _buildJourneeFilterOption(filterNotifier, 'note_moins_30', 'Note < 30%'),
+                _buildJourneeFilterOption(
+                  filterNotifier,
+                  'note_plus_80',
+                  'Note > 80%',
+                ),
+                _buildJourneeFilterOption(
+                  filterNotifier,
+                  'note_50_80',
+                  'Note 50%-80%',
+                ),
+                _buildJourneeFilterOption(
+                  filterNotifier,
+                  'note_moins_50',
+                  'Note < 50%',
+                ),
+                _buildJourneeFilterOption(
+                  filterNotifier,
+                  'note_moins_30',
+                  'Note < 30%',
+                ),
                 const Divider(),
-                _buildJourneeFilterOption(filterNotifier, 'avec_emoji', 'Avec emoji'),
-                _buildJourneeFilterOption(filterNotifier, 'sans_emoji', 'Sans emoji'),
-                _buildJourneeFilterOption(filterNotifier, 'avec_commentaire', 'Avec commentaire'),
-                _buildJourneeFilterOption(filterNotifier, 'sans_commentaire', 'Sans commentaire'),
+                _buildJourneeFilterOption(
+                  filterNotifier,
+                  'avec_emoji',
+                  'Avec emoji',
+                ),
+                _buildJourneeFilterOption(
+                  filterNotifier,
+                  'sans_emoji',
+                  'Sans emoji',
+                ),
+                _buildJourneeFilterOption(
+                  filterNotifier,
+                  'avec_commentaire',
+                  'Avec commentaire',
+                ),
+                _buildJourneeFilterOption(
+                  filterNotifier,
+                  'sans_commentaire',
+                  'Sans commentaire',
+                ),
                 const Divider(),
-                _buildJourneeFilterOption(filterNotifier, 'public', 'Publiques'),
+                _buildJourneeFilterOption(
+                  filterNotifier,
+                  'public',
+                  'Publiques',
+                ),
                 _buildJourneeFilterOption(filterNotifier, 'prive', 'Privées'),
               ],
             ),
@@ -6382,7 +9746,11 @@ class HomePageState extends State<HomePage>
     );
   }
 
-  Widget _buildJourneeFilterOption(ValueNotifier<String> filterNotifier, String filterValue, String label) {
+  Widget _buildJourneeFilterOption(
+    ValueNotifier<String> filterNotifier,
+    String filterValue,
+    String label,
+  ) {
     return ValueListenableBuilder<String>(
       valueListenable: filterNotifier,
       builder: (context, currentFilter, child) {
@@ -6402,7 +9770,10 @@ class HomePageState extends State<HomePage>
     );
   }
 
-  List<JourneeModel> _filterJournees(List<JourneeModel> journees, String filter) {
+  List<JourneeModel> _filterJournees(
+    List<JourneeModel> journees,
+    String filter,
+  ) {
     return journees.where((journee) {
       if (filter == 'tout') return true;
 
@@ -6443,7 +9814,6 @@ class HomePageState extends State<HomePage>
     }).toList();
   }
 
-
   bool _isDifferentDate(DateTime date1, DateTime date2) {
     return date1.year != date2.year ||
         date1.month != date2.month ||
@@ -6453,7 +9823,7 @@ class HomePageState extends State<HomePage>
   Widget _buildEmptyMessage(String message) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 20.0),
+        padding: const EdgeInsets.symmetric(vertical: 20.0, horizontal: 20.0),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -6461,10 +9831,8 @@ class HomePageState extends State<HomePage>
             const SizedBox(height: 20),
             Text(
               message,
-              style: const TextStyle(
-                fontSize: 18,
-                color: Colors.grey,
-              ),
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 18, color: Colors.grey),
             ),
           ],
         ),
@@ -6535,14 +9903,18 @@ class HomePageState extends State<HomePage>
     if (currentUser == null) return;
 
     try {
-      DocumentSnapshot userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(currentUser.uid)
-          .get();
+      DocumentSnapshot userDoc =
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(currentUser.uid)
+              .get();
 
-      int qualiteDeVieActuelle = userDoc.exists
-          ? (userDoc.data() as Map<String, dynamic>)['qualiteDeVieActuelle'] ?? 50
-          : 50;
+      int qualiteDeVieActuelle =
+          userDoc.exists
+              ? (userDoc.data()
+                      as Map<String, dynamic>)['qualiteDeVieActuelle'] ??
+                  50
+              : 50;
 
       int noteJournee = 50;
       if (journee.note != null && journee.note!.contains('/')) {
@@ -6553,7 +9925,8 @@ class HomePageState extends State<HomePage>
         }
       }
 
-      int nouvelleQualiteDeVie = ((qualiteDeVieActuelle * 2 - noteJournee) / 3).round();
+      int nouvelleQualiteDeVie =
+          ((qualiteDeVieActuelle * 2 - noteJournee) / 3).round();
       nouvelleQualiteDeVie = nouvelleQualiteDeVie.clamp(0, 100);
 
       await FirebaseFirestore.instance
@@ -6564,9 +9937,7 @@ class HomePageState extends State<HomePage>
       await FirebaseFirestore.instance
           .collection('users')
           .doc(currentUser.uid)
-          .update({
-        'qualiteDeVieActuelle': nouvelleQualiteDeVie,
-      });
+          .update({'qualiteDeVieActuelle': nouvelleQualiteDeVie});
 
       setState(() {
         _myJournees.remove(journee);
@@ -6581,13 +9952,16 @@ class HomePageState extends State<HomePage>
       );
     }
   }
+
   void _showCommentsDialog(JourneeModel journee, {required bool isMyJournees}) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       builder: (context) {
         return Padding(
-          padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom,
+          ),
           child: SizedBox(
             height: MediaQuery.of(context).size.height * 0.7,
             child: CommentsSection(
@@ -6599,7 +9973,505 @@ class HomePageState extends State<HomePage>
       },
     );
   }
+
+  void _showPopupCardSouvenir(
+    BuildContext context,
+    SouvenirModel souvenir,
+    String design,
+    String color,
+  ) {
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+      barrierColor: Colors.black54,
+      transitionDuration: const Duration(milliseconds: 300),
+      pageBuilder: (context, animation, secondaryAnimation) {
+        final bool isSpecialShape = [
+          'coeur',
+          'etoile',
+          'rond',
+        ].contains(design);
+        final double paddingValue = isSpecialShape ? 50.0 : 40.0;
+        // No need for qualiteAsString here, use souvenir.qualite directly
+
+        return GestureDetector(
+          onTap: () => Navigator.of(context).pop(),
+          child: Material(
+            color: Colors.transparent,
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
+              child: Center(
+                child: ScaleTransition(
+                  scale: CurvedAnimation(
+                    parent: animation,
+                    curve: Curves.easeOutBack,
+                  ),
+                  child: GestureDetector(
+                    onTap:
+                        () {}, // Empêche la propagation du tap vers le parent
+                    child: SizedBox(
+                      width: MediaQuery.of(context).size.width * 0.65,
+                      height: MediaQuery.of(context).size.width * 0.65,
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          Positioned.fill(
+                            child: Image.asset(
+                              _getImagePath(design, color),
+                              fit: BoxFit.contain,
+                              errorBuilder:
+                                  (context, error, stackTrace) => Container(
+                                    color: Colors.white,
+                                    child: const Icon(
+                                      Icons.broken_image,
+                                      color: Colors.grey,
+                                    ),
+                                  ),
+                            ),
+                          ),
+                          Padding(
+                            padding: EdgeInsets.all(paddingValue),
+                            child: SingleChildScrollView(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  if (souvenir.isRepost)
+                                    Text(
+                                      'Republié de ${souvenir.repostedFromUserName ?? 'un ami'}',
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.white70,
+                                      ),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  Text(
+                                    souvenir.texte,
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
+                                      shadows: <Shadow>[
+                                        Shadow(
+                                          offset: Offset(1.5, 1.5),
+                                          blurRadius: 3.0,
+                                          color: Colors.black87,
+                                        ),
+                                        Shadow(
+                                          offset: Offset(-1.5, -1.5),
+                                          blurRadius: 3.0,
+                                          color: Colors.black87,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  if (souvenir.photoUrls.isNotEmpty) ...[
+                                    const SizedBox(height: 8),
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(10),
+                                      child: Image.network(
+                                        souvenir.photoUrls.first,
+                                        height: 100,
+                                        width: double.infinity,
+                                        fit: BoxFit.cover,
+                                      ),
+                                    ),
+                                  ],
+                                  const SizedBox(height: 6),
+                                  Chip(
+                                    label: Text(
+                                      _getQualiteLabel(souvenir.qualite),
+                                      style: TextStyle(
+                                        color: _getQualiteColor(
+                                          souvenir.qualite,
+                                        ), // Use souvenir.qualite directly
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    backgroundColor: _getQualiteColor(
+                                      souvenir.qualite,
+                                    ).withOpacity(
+                                      0.15,
+                                    ), // Use souvenir.qualite directly
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Note: ${souvenir.noteQualite}/100',
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      color: Colors.black87,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showPopupCardJournee(
+    BuildContext context,
+    JourneeModel journee,
+    String design,
+    String color,
+  ) {
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+      barrierColor: Colors.black54,
+      transitionDuration: const Duration(milliseconds: 300),
+      pageBuilder: (context, animation, secondaryAnimation) {
+        final bool isSpecialShape = [
+          'coeur',
+          'etoile',
+          'rond',
+        ].contains(design);
+        final double paddingValue = isSpecialShape ? 50.0 : 40.0;
+
+        return GestureDetector(
+          onTap: () => Navigator.of(context).pop(),
+          child: Material(
+            color: Colors.transparent,
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
+              child: Center(
+                child: ScaleTransition(
+                  scale: CurvedAnimation(
+                    parent: animation,
+                    curve: Curves.easeOutBack,
+                  ),
+                  child: GestureDetector(
+                    onTap:
+                        () {}, // Empêche la propagation du tap vers le parent
+                    child: SizedBox(
+                      width: MediaQuery.of(context).size.width * 0.65,
+                      height: MediaQuery.of(context).size.width * 0.65,
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          Positioned.fill(
+                            child: Image.asset(
+                              _getImagePath(design, color),
+                              fit: BoxFit.contain,
+                              errorBuilder:
+                                  (context, error, stackTrace) => Container(
+                                    color: Colors.white,
+                                    child: const Icon(
+                                      Icons.broken_image,
+                                      color: Colors.grey,
+                                    ),
+                                  ),
+                            ),
+                          ),
+                          Padding(
+                            padding: EdgeInsets.all(paddingValue),
+                            child: SingleChildScrollView(
+                              child: StatefulBuilder(
+                                builder: (
+                                  BuildContext context,
+                                  StateSetter setDialogState,
+                                ) {
+                                  bool isSearching = false;
+                                  String? searchError;
+                                  List<MapEntry<JourneeModel, double>>?
+                                  displayedSimilarities;
+                                  DateTime? lastSearchDate;
+                                  bool hasResultsInCache = false;
+
+                                  // ✅ Chargement du cache Firestore
+                                  Future<void> loadCache() async {
+                                    if (journee.id == null) return;
+                                    final doc =
+                                        await FirebaseFirestore.instance
+                                            .collection('journees')
+                                            .doc(journee.id)
+                                            .get();
+                                    if (!doc.exists) return;
+
+                                    final data = doc.data();
+                                    final cache =
+                                        data?['similarJourneesCache']
+                                            as Map<String, dynamic>?;
+                                    final lastSearchTimestamp =
+                                        data?['lastSimilaritySearchDate']
+                                            as Timestamp?;
+
+                                    if (lastSearchTimestamp != null) {
+                                      lastSearchDate =
+                                          lastSearchTimestamp.toDate();
+                                    }
+
+                                    if (cache != null && cache.isNotEmpty) {
+                                      hasResultsInCache = true;
+                                      final futures =
+                                          cache.entries.map((entry) async {
+                                            final journeeDoc =
+                                                await FirebaseFirestore.instance
+                                                    .collection('journees')
+                                                    .doc(entry.key)
+                                                    .get();
+                                            if (journeeDoc.exists) {
+                                              return MapEntry(
+                                                JourneeModel.fromFirestore(
+                                                  journeeDoc,
+                                                ),
+                                                (entry.value as num).toDouble(),
+                                              );
+                                            }
+                                            return null;
+                                          }).toList();
+
+                                      final results =
+                                          (await Future.wait(futures))
+                                              .whereType<
+                                                MapEntry<JourneeModel, double>
+                                              >()
+                                              .toList();
+                                      results.sort(
+                                        (a, b) => b.value.compareTo(a.value),
+                                      );
+                                      displayedSimilarities = results;
+                                    }
+                                  }
+
+                                  // ✅ Lancer une recherche / mise à jour
+                                  Future<void> handleSearch() async {
+                                    setDialogState(() {
+                                      isSearching = true;
+                                      searchError = null;
+                                    });
+
+                                    try {
+                                      final results =
+                                          await _findSimilarJournees(
+                                            journee,
+                                            searchAfter: lastSearchDate,
+                                          );
+
+                                      await FirebaseFirestore.instance
+                                          .collection('journees')
+                                          .doc(journee.id)
+                                          .set({
+                                            'similarJourneesCache': results.map(
+                                              (key, value) =>
+                                                  MapEntry(key.id!, value),
+                                            ),
+                                            'lastSimilaritySearchDate':
+                                                FieldValue.serverTimestamp(),
+                                          }, SetOptions(merge: true));
+
+                                      setDialogState(() {
+                                        displayedSimilarities =
+                                            results.entries.toList();
+                                        hasResultsInCache = results.isNotEmpty;
+                                        lastSearchDate = DateTime.now();
+                                      });
+                                    } catch (e) {
+                                      setDialogState(() {
+                                        searchError =
+                                            "Erreur : ${e.toString()}";
+                                      });
+                                    } finally {
+                                      setDialogState(() {
+                                        isSearching = false;
+                                      });
+                                    }
+                                  }
+
+                                  // ✅ Affichage via FutureBuilder
+                                  return FutureBuilder(
+                                    future: loadCache(),
+                                    builder: (context, snapshot) {
+                                      if (snapshot.connectionState ==
+                                          ConnectionState.waiting) {
+                                        return const Center(
+                                          child: CircularProgressIndicator(),
+                                        );
+                                      }
+
+                                      return Column(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.center,
+                                        children: [
+                                          Text(
+                                            journee.emoji ?? '🤔',
+                                            style: const TextStyle(
+                                              fontSize: 40,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 10),
+                                          Text(
+                                            journee.texte1 ?? 'Aucun texte',
+                                            textAlign: TextAlign.center,
+                                            style: const TextStyle(
+                                              fontSize: 18,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.white,
+                                              shadows: <Shadow>[
+                                                Shadow(
+                                                  offset: Offset(1.5, 1.5),
+                                                  blurRadius: 3.0,
+                                                  color: Colors.black87,
+                                                ),
+                                                Shadow(
+                                                  offset: Offset(-1.5, -1.5),
+                                                  blurRadius: 3.0,
+                                                  color: Colors.black87,
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                          const SizedBox(height: 12),
+                                          // Removed the Chip displaying 'Qualité'
+                                          Text(
+                                            'Note: ${journee.note ?? 'N/A'}/100', // Display journee.note instead
+                                            style: const TextStyle(
+                                              fontSize: 16,
+                                              color: Colors.black87,
+                                            ),
+                                          ),
+
+                                          const SizedBox(height: 20),
+                                          const Divider(color: Colors.white70),
+
+                                          // 🔍 Affichage des résultats similaires
+                                          if (searchError != null)
+                                            Text(
+                                              searchError!,
+                                              style: const TextStyle(
+                                                color: Colors.red,
+                                              ),
+                                            )
+                                          else if (displayedSimilarities !=
+                                                  null &&
+                                              displayedSimilarities!.isNotEmpty)
+                                            Column(
+                                              children: [
+                                                const Text(
+                                                  'Journées similaires :',
+                                                  style: TextStyle(
+                                                    fontSize: 16,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: Colors.white,
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 8),
+                                                ...displayedSimilarities!.map((
+                                                  entry,
+                                                ) {
+                                                  return Card(
+                                                    color: Colors.white
+                                                        .withValues(
+                                                          alpha: 0.85,
+                                                        ),
+                                                    margin:
+                                                        const EdgeInsets.symmetric(
+                                                          vertical: 4,
+                                                        ),
+                                                    child: ListTile(
+                                                      title: Text(
+                                                        DateFormat(
+                                                          'd MMMM yyyy',
+                                                        ).format(
+                                                          entry.key.date,
+                                                        ),
+                                                        style: const TextStyle(
+                                                          fontWeight:
+                                                              FontWeight.bold,
+                                                        ),
+                                                      ),
+                                                      subtitle: Text(
+                                                        entry.key.texte1 ?? '',
+                                                        maxLines: 1,
+                                                        overflow:
+                                                            TextOverflow
+                                                                .ellipsis,
+                                                      ),
+                                                      trailing: Text(
+                                                        '${entry.value.toStringAsFixed(0)}%',
+                                                        style: const TextStyle(
+                                                          fontWeight:
+                                                              FontWeight.bold,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  );
+                                                }).toList(),
+                                              ],
+                                            )
+                                          else if (lastSearchDate != null &&
+                                              !hasResultsInCache)
+                                            const Text(
+                                              "Aucune journée similaire trouvée.",
+                                              style: TextStyle(
+                                                color: Colors.white70,
+                                                fontStyle: FontStyle.italic,
+                                              ),
+                                            ),
+
+                                          const SizedBox(height: 12),
+
+                                          // 🔘 Bouton de recherche
+                                          isSearching
+                                              ? const CircularProgressIndicator()
+                                              : ElevatedButton.icon(
+                                                icon: Icon(
+                                                  hasResultsInCache
+                                                      ? Icons.sync
+                                                      : Icons.search,
+                                                  color: Colors.white,
+                                                ),
+                                                label: Text(
+                                                  hasResultsInCache
+                                                      ? 'Mettre à jour'
+                                                      : 'Rechercher des journées similaires',
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                  ),
+                                                ),
+                                                style: ElevatedButton.styleFrom(
+                                                  backgroundColor:
+                                                      Colors.blueAccent,
+                                                ),
+                                                onPressed: handleSearch,
+                                              ),
+                                        ],
+                                      );
+                                    },
+                                  );
+                                },
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
 }
+
 class CommentsSection extends StatefulWidget {
   final String journeeId;
   final bool isMyJournees;
@@ -6618,295 +10490,444 @@ class _CommentsSectionState extends State<CommentsSection> {
   final TextEditingController _commentController = TextEditingController();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final User? currentUser = FirebaseAuth.instance.currentUser;
+  bool _isPosting = false;
 
   Future<void> _postComment() async {
-    if (_commentController.text.trim().isEmpty || currentUser == null) {
+    if (_commentController.text.trim().isEmpty ||
+        currentUser == null ||
+        _isPosting)
       return;
+    setState(() => _isPosting = true);
+    try {
+      final userDoc =
+          await _firestore.collection('users').doc(currentUser!.uid).get();
+      final username = userDoc.data()?['username'] ?? 'Utilisateur anonyme';
+      await _firestore
+          .collection('journees')
+          .doc(widget.journeeId)
+          .collection('comments')
+          .add({
+            'text': _commentController.text.trim(),
+            'userId': currentUser!.uid,
+            'username': username,
+            'timestamp': FieldValue.serverTimestamp(),
+          });
+      NotificationService.notifyOwnerOnInteraction(
+        journeeId: widget.journeeId,
+        interactorName: username,
+        action: "commenté",
+      );
+      if (mounted) {
+        _commentController.clear();
+        FocusScope.of(context).unfocus();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erreur lors de l\'envoi: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isPosting = false);
     }
+  }
 
-    final userDoc = await _firestore.collection('users').doc(currentUser!.uid).get();
-    final username = userDoc.data()?['username'] ?? 'Utilisateur anonyme';
+  Future<void> _deleteComment(String commentId) async {
+    try {
+      await _firestore
+          .collection('journees')
+          .doc(widget.journeeId)
+          .collection('comments')
+          .doc(commentId)
+          .delete();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erreur lors de la suppression: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
 
-    await _firestore
-        .collection('journees')
-        .doc(widget.journeeId)
-        .collection('comments')
-        .add({
-      'text': _commentController.text,
-      'userId': currentUser!.uid,
-      'username': username,
-      'timestamp': FieldValue.serverTimestamp(),
-    });
-
-// --- AMÉLIORATION : Envoyer une notification ---
-    NotificationService.notifyOwnerOnInteraction(
-      journeeId: widget.journeeId,
-      interactorName: username,
-      action: "commenté",
+  void _reportComment(String commentId) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Commentaire signalé à la modération.'),
+        backgroundColor: Colors.orange,
+      ),
     );
+    // Optionnel : Enregistrer le signalement dans Firestore
+    // _firestore.collection('reports').add({...});
+  }
 
-    _commentController.clear();
-    FocusScope.of(context).unfocus();
+  @override
+  void dispose() {
+    _commentController.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        const Padding(
-          padding: EdgeInsets.all(16.0),
-          child: Text(
-            'Commentaires',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.blue),
-          ),
-        ),
-        Expanded(
-          child: StreamBuilder<QuerySnapshot>(
-            stream: _firestore
-                .collection('journees')
-                .doc(widget.journeeId)
-                .collection('comments')
-                .orderBy('timestamp', descending: true)
-                .snapshots(),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                return const Center(child: Text('Aucun commentaire pour le moment.'));
-              }
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bgColor = isDark ? Colors.grey[900] : Colors.white;
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final subtitleColor = isDark ? Colors.grey[400] : Colors.grey[600];
 
-              final comments = snapshot.data!.docs;
-
-              return ListView.builder(
-                itemCount: comments.length,
-                itemBuilder: (context, index) {
-                  final comment = comments[index];
-                  final data = comment.data() as Map<String, dynamic>;
-                  final timestamp = data['timestamp'] as Timestamp?;
-                  final date = timestamp?.toDate();
-
-                  return ListTile(
-                    title: Text(data['username'] ?? 'Anonyme', style: const TextStyle(fontWeight: FontWeight.bold)),
-                    subtitle: Text(data['text'] ?? ''),
-                    trailing: date != null
-                        ? Text(
-                      DateFormat('dd/MM HH:mm').format(date),
-                      style: const TextStyle(color: Colors.grey, fontSize: 12),
-                    )
-                        : null,
-                  );
-                },
-              );
-            },
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.all(8.0),
-          child: Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _commentController,
-                  decoration: const InputDecoration(
-                    hintText: 'Ajouter un commentaire...',
-                    border: OutlineInputBorder(),
-                  ),
+    return Container(
+      color: bgColor,
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 16.0,
+              vertical: 12.0,
+            ),
+            decoration: BoxDecoration(
+              color: isDark ? Colors.grey[850] : Colors.blue.shade50,
+              border: Border(
+                bottom: BorderSide(
+                  color: isDark ? Colors.grey.shade700 : Colors.blue.shade100,
                 ),
               ),
-              IconButton(
-                icon: const Icon(Icons.send, color: Colors.blue),
-                onPressed: _postComment,
-              ),
-            ],
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Commentaires',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.blue.shade300 : Colors.blue,
+                  ),
+                ),
+                IconButton(
+                  icon: Icon(
+                    Icons.close,
+                    color: isDark ? Colors.white70 : Colors.grey,
+                  ),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
           ),
-        ),
-      ],
+          Expanded(
+            child: StreamBuilder<QuerySnapshot>(
+              stream:
+                  _firestore
+                      .collection('journees')
+                      .doc(widget.journeeId)
+                      .collection('comments')
+                      .orderBy('timestamp', descending: false)
+                      .snapshots(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (snapshot.hasError) {
+                  return Center(
+                    child: Text(
+                      'Erreur de chargement.',
+                      style: TextStyle(color: textColor),
+                    ),
+                  );
+                }
+                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.chat_bubble_outline,
+                          size: 48,
+                          color:
+                              isDark
+                                  ? Colors.grey.shade600
+                                  : Colors.grey.shade400,
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Aucun commentaire pour le moment.',
+                          style: TextStyle(color: subtitleColor),
+                        ),
+                      ],
+                    ),
+                  );
+                }
+                final comments = snapshot.data!.docs;
+                return ListView.builder(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                  itemCount: comments.length,
+                  itemBuilder: (context, index) {
+                    final comment = comments[index];
+                    final data = comment.data() as Map<String, dynamic>;
+                    final timestamp = data['timestamp'] as Timestamp?;
+                    final date = timestamp?.toDate();
+                    final isMyComment = data['userId'] == currentUser?.uid;
+                    return ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor:
+                            isDark
+                                ? Colors.blue.shade900
+                                : Colors.blue.shade100,
+                        child: Text(
+                          ((data['username'] as String?) ?? 'A')[0]
+                              .toUpperCase(),
+                          style: TextStyle(
+                            color:
+                                isDark
+                                    ? Colors.blue.shade300
+                                    : Colors.blue.shade700,
+                          ),
+                        ),
+                      ),
+                      title: Row(
+                        children: [
+                          Text(
+                            data['username'] ?? 'Anonyme',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: textColor,
+                              fontSize: 14,
+                            ),
+                          ),
+                          if (isMyComment) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.blue.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                'Moi',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color:
+                                      isDark
+                                          ? Colors.blue.shade300
+                                          : Colors.blue,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      subtitle: Text(
+                        data['text'] ?? '',
+                        style: TextStyle(color: textColor, fontSize: 14),
+                      ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (date != null)
+                            Text(
+                              DateFormat('dd/MM HH:mm').format(date),
+                              style: TextStyle(
+                                color: subtitleColor,
+                                fontSize: 11,
+                              ),
+                            ),
+                          PopupMenuButton<String>(
+                            icon: Icon(
+                              Icons.more_vert,
+                              size: 18,
+                              color: subtitleColor,
+                            ),
+                            onSelected: (value) {
+                              if (value == 'delete') _deleteComment(comment.id);
+                              if (value == 'report') _reportComment(comment.id);
+                            },
+                            itemBuilder:
+                                (BuildContext context) => [
+                                  if (isMyComment || widget.isMyJournees)
+                                    const PopupMenuItem(
+                                      value: 'delete',
+                                      child: Text(
+                                        'Supprimer',
+                                        style: TextStyle(color: Colors.red),
+                                      ),
+                                    ),
+                                  if (!isMyComment)
+                                    const PopupMenuItem(
+                                      value: 'report',
+                                      child: Text('Signaler'),
+                                    ),
+                                ],
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.all(10.0),
+            decoration: BoxDecoration(
+              color: isDark ? Colors.grey[850] : Colors.grey.shade50,
+              border: Border(
+                top: BorderSide(
+                  color: isDark ? Colors.grey.shade700 : Colors.grey.shade200,
+                ),
+              ),
+            ),
+            child: SafeArea(
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _commentController,
+                      style: TextStyle(color: textColor),
+                      decoration: InputDecoration(
+                        hintText: 'Ajouter un commentaire...',
+                        hintStyle: TextStyle(color: subtitleColor),
+                        filled: true,
+                        fillColor: isDark ? Colors.grey[800] : Colors.white,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 10,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(25),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                      maxLines: null,
+                      textInputAction: TextInputAction.send,
+                      onSubmitted: (_) => _postComment(),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  _isPosting
+                      ? const SizedBox(
+                        width: 40,
+                        height: 40,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                      : IconButton(
+                        icon: const Icon(Icons.send_rounded),
+                        color: Colors.blue,
+                        onPressed: _postComment,
+                        tooltip: 'Envoyer',
+                      ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
-class HeartShapeBorder extends ShapeBorder {
-  const HeartShapeBorder();
+
+class _AssociatedMemoriesWidget extends StatefulWidget {
+  final JourneeModel journee;
+  final List<SouvenirModel> souvenirs;
+  final bool showRepublishButton;
+  final bool hasUserPostedToday;
+  final Widget Function(
+    SouvenirModel, {
+    bool showRepublishButton,
+    required bool hasUserPostedToday,
+  })
+  buildSouvenirCard;
+  final Color mainTextColor;
+
+  const _AssociatedMemoriesWidget({
+    Key? key,
+    required this.journee,
+    required this.souvenirs,
+    required this.showRepublishButton,
+    required this.hasUserPostedToday,
+    required this.buildSouvenirCard,
+    required this.mainTextColor,
+  }) : super(key: key);
 
   @override
-  EdgeInsetsGeometry get dimensions => EdgeInsets.zero;
-
-  @override
-  ui.Path getInnerPath(ui.Rect rect, {ui.TextDirection? textDirection}) {
-    return getOuterPath(rect, textDirection: textDirection);
-  }
-
-  @override
-  ui.Path getOuterPath(ui.Rect rect, {ui.TextDirection? textDirection}) {
-    final path = ui.Path();
-    final double width = rect.width;
-    final double height = rect.height;
-    final double x = rect.left;
-    final double y = rect.top;
-
-    // Point de départ au centre en haut (la fente du cœur)
-    path.moveTo(x + width / 2, y + height * 0.3);
-
-    // Lobe supérieur gauche
-    path.cubicTo(x + width * 0.2, y,
-        x, y + height * 0.2,
-        x, y + height * 0.4);
-
-    // Moitié inférieure gauche jusqu'à la pointe
-    path.cubicTo(x, y + height * 0.7,
-        x + width * 0.4, y + height * 0.9,
-        x + width / 2, y + height);
-
-    // Moitié inférieure droite depuis la pointe
-    path.cubicTo(x + width * 0.6, y + height * 0.9,
-        x + width, y + height * 0.7,
-        x + width, y + height * 0.4);
-
-    // Lobe supérieur droit
-    path.cubicTo(x + width, y + height * 0.2,
-        x + width * 0.8, y,
-        x + width / 2, y + height * 0.3);
-
-    path.close();
-    return path;
-  }
-
-  @override
-  void paint(ui.Canvas canvas, ui.Rect rect, {ui.TextDirection? textDirection}) {}
-
-  @override
-  ShapeBorder scale(double t) => this;
-}
-// CORRECTION : On utilise le préfixe 'ui.' pour éviter les conflits de type
-class StarShapeBorder extends ShapeBorder {
-  final int points;
-  const StarShapeBorder({this.points = 5});
-
-  @override
-  EdgeInsetsGeometry get dimensions => EdgeInsets.zero;
-
-  @override
-  ui.Path getInnerPath(ui.Rect rect, {ui.TextDirection? textDirection}) {
-    return getOuterPath(rect, textDirection: textDirection);
-  }
-
-  @override
-  ui.Path getOuterPath(ui.Rect rect, {ui.TextDirection? textDirection}) {
-    // 1. On dessine une étoile "modèle" sur une toile virtuelle.
-    final path = ui.Path();
-    const double tempSize = 100.0;
-    const double centerX = tempSize / 2;
-    const double centerY = tempSize / 2;
-    const double outerRadius = tempSize / 2;
-    const double innerRadius = outerRadius / 2.5;
-    final double step = (math.pi * 2) / (points * 2);
-    const double initialAngle = -math.pi / 2;
-
-    for (int i = 0; i < points * 2; i++) {
-      final double radius = (i.isEven) ? outerRadius : innerRadius;
-      final double angle = initialAngle + i * step;
-      final double x = centerX + radius * math.cos(angle);
-      final double y = centerY + radius * math.sin(angle);
-      if (i == 0) {
-        path.moveTo(x, y);
-      } else {
-        path.lineTo(x, y);
-      }
-    }
-    path.close();
-
-    // 2. On récupère les dimensions du modèle.
-    final templateBounds = path.getBounds();
-
-    // 3. On calcule les facteurs d'échelle.
-    final double scaleX = rect.width / templateBounds.width;
-    final double scaleY = rect.height / templateBounds.height;
-
-    // 4. On crée la matrice de transformation.
-    final matrix = Matrix4.identity();
-    matrix.translate(rect.left, rect.top);
-    matrix.scale(scaleX, scaleY);
-    matrix.translate(-templateBounds.left, -templateBounds.top);
-
-    // 5. On applique la transformation.
-    return path.transform(matrix.storage);
-  }
-
-  @override
-  void paint(ui.Canvas canvas, ui.Rect rect, {ui.TextDirection? textDirection}) {}
-
-  @override
-  ShapeBorder scale(double t) => this;
+  State<_AssociatedMemoriesWidget> createState() =>
+      _AssociatedMemoriesWidgetState();
 }
 
-
-class RoundShapeBorder extends ShapeBorder {
-  const RoundShapeBorder();
-
-  @override
-  EdgeInsetsGeometry get dimensions => EdgeInsets.zero;
+class _AssociatedMemoriesWidgetState extends State<_AssociatedMemoriesWidget> {
+  bool _isVisible = false;
 
   @override
-  ui.Path getInnerPath(ui.Rect rect, {ui.TextDirection? textDirection}) {
-    return getOuterPath(rect, textDirection: textDirection);
+  Widget build(BuildContext context) {
+    if (widget.souvenirs.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize:
+          MainAxisSize.min, // S'assure qu'il ne prend que la place nécessaire
+      children: [
+        Center(
+          child: SizedBox(
+            height: 30, // Réduit la hauteur du bouton pour gagner de la place
+            child: IconButton(
+              padding: EdgeInsets.zero,
+              icon: Icon(
+                _isVisible
+                    ? Icons.keyboard_arrow_up
+                    : Icons.keyboard_arrow_down,
+                color: widget.mainTextColor.withOpacity(0.8),
+                size: 28,
+              ),
+              onPressed: () {
+                setState(() {
+                  _isVisible = !_isVisible;
+                });
+              },
+            ),
+          ),
+        ),
+        if (_isVisible)
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Divider(color: widget.mainTextColor.withOpacity(0.3), height: 8),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4.0),
+                child: Text(
+                  'Souvenirs associés :',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: widget.mainTextColor,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+              SizedBox(
+                height: 120, // Hauteur fixe pour éviter l'overflow
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: widget.souvenirs.length,
+                  itemBuilder: (context, index) {
+                    return Container(
+                      width: 200,
+                      margin: const EdgeInsets.only(right: 10.0),
+                      child: widget.buildSouvenirCard(
+                        widget.souvenirs[index],
+                        showRepublishButton: widget.showRepublishButton,
+                        hasUserPostedToday: widget.hasUserPostedToday,
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+      ],
+    );
   }
-
-  @override
-  ui.Path getOuterPath(ui.Rect rect, {ui.TextDirection? textDirection}) {
-    return ui.Path()..addOval(ui.Rect.fromCircle(center: rect.center, radius: rect.shortestSide / 2));
-  }
-
-  @override
-  void paint(ui.Canvas canvas, ui.Rect rect, {ui.TextDirection? textDirection}) {}
-
-  @override
-  ShapeBorder scale(double t) => this;
-}
-
-class SouvenirMinimalistShapeBorder extends ShapeBorder {
-  const SouvenirMinimalistShapeBorder();
-
-  @override
-  EdgeInsetsGeometry get dimensions => EdgeInsets.zero;
-
-  @override
-  ui.Path getInnerPath(ui.Rect rect, {ui.TextDirection? textDirection}) {
-    return getOuterPath(rect, textDirection: textDirection);
-  }
-
-  @override
-  ui.Path getOuterPath(ui.Rect rect, {ui.TextDirection? textDirection}) {
-    return ui.Path()
-      ..addRRect(ui.RRect.fromRectAndRadius(rect, const Radius.circular(18.0)));
-  }
-
-  @override
-  void paint(ui.Canvas canvas, ui.Rect rect, {ui.TextDirection? textDirection}) {}
-
-  @override
-  ShapeBorder scale(double t) => this;
-}
-
-class JourneeMinimalistShapeBorder extends ShapeBorder {
-  const JourneeMinimalistShapeBorder();
-
-  @override
-  EdgeInsetsGeometry get dimensions => EdgeInsets.zero;
-
-  @override
-  ui.Path getInnerPath(ui.Rect rect, {ui.TextDirection? textDirection}) {
-    return getOuterPath(rect, textDirection: textDirection);
-  }
-
-  @override
-  ui.Path getOuterPath(ui.Rect rect, {ui.TextDirection? textDirection}) {
-    return ui.Path()
-      ..addRRect(ui.RRect.fromRectAndRadius(rect, const Radius.circular(20.0)));
-  }
-
-  @override
-  void paint(ui.Canvas canvas, ui.Rect rect, {ui.TextDirection? textDirection}) {}
-
-  @override
-  ShapeBorder scale(double t) => this;
 }

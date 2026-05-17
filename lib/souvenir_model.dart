@@ -11,6 +11,7 @@ class SouvenirModel {
   final DateTime date;
   final bool estPublic;
   final SouvenirQualite qualite;
+  final String? cardColor;
   final int noteQualite;
   int qualiteDeVieActuelle;
   final List<String> photoUrls; // CHANGEMENT ICI: N'est plus nullable (List<String>?)
@@ -24,6 +25,7 @@ class SouvenirModel {
     required this.userId,
     required this.texte,
     required this.date,
+    this.cardColor,
     required this.estPublic,
     required this.qualite,
     required this.noteQualite,
@@ -75,6 +77,7 @@ class SouvenirModel {
       isRepost: data['isRepost'] ?? false,
       repostedFromUserId: data['repostedFromUserId'],
       repostedFromUserName: data['repostedFromUserName'],
+      cardColor: data['cardColor'],
     );
   }
 
@@ -86,6 +89,7 @@ class SouvenirModel {
       'estPublic': estPublic,
       'qualite': qualite.name,
       'noteQualite': noteQualite,
+      'cardColor': cardColor,
       'qualiteDeVieActuelle': qualiteDeVieActuelle,
       'photoUrls': photoUrls,
       'isRepost': isRepost,

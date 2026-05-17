@@ -1,4 +1,4 @@
-// journee_page.dart
+﻿// journee_page.dart
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart' as auth;
@@ -7,7 +7,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
-
+import 'dart:async';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
@@ -22,6 +22,7 @@ import 'main.dart'; // Assurez-vous que cette importation est correcte pour votr
 import 'journee_model.dart'; // Assurez-vous que cette importation est correcte
 import 'souvenir_model.dart'; // Importez le modèle de souvenir
 import 'home_page.dart' show getUserSubscriptionData, showVipPromotionPopup;
+import 'ai_model_selector.dart';
 
 // Définissez SouvenirQualite si ce n'est pas déjà dans souvenir_model.dart
 
@@ -30,7 +31,7 @@ final ValueNotifier<Brightness> appBrightnessNotifier = ValueNotifier<Brightness
 
 // AJOUTÉ : Clé API nécessaire pour l'analyse des éléments intéressants.
 // (À NE PAS LAISSER EN DUR EN PRODUCTION !)
-const String DEEPSEEK_API_KEY = 'sk-2891f44dd4e344908dda525bf5852649'; // REMPLACEZ PAR VOTRE VRAIE CLÉ !
+const String DEEPSEEK_API_KEY = 'HA2RvSG1u7aE7u78yXd1UqnBuMY6VV70'; // REMPLACEZ PAR VOTRE VRAIE CLÉ !
 
 
 class JourneePage extends StatefulWidget {
@@ -56,16 +57,16 @@ class _JourneePageState extends State<JourneePage> {
   // Données de la journée
   bool _estPublic = false;
   String? _selectedEmoji;
-  String? _commentaire = '';
+  // REMOVED: String? _commentaire = ''; // Le commentaire n'est plus un champ distinct de la UI
   int? _note; // Note IA (ou manuelle finale)
   List<String> _motsCles = []; // Initialisé vide
   List<dynamic> _displayImages = []; // Combined list for XFile and URLs
   List<String> _mentionedUserIds = []; // Pour stocker les ID des mentions
 
   // State pour l'UI et les fonctionnalités
-  bool _isCommentEnabled = true;
+  // REMOVED: bool _isCommentEnabled = true; // Plus besoin car plus de section commentaire
   double _manualProgress = 50.0; // Initialisé à 50
-  bool _isManualProgressActive = false; // Indique si le slider de note manuelle a été déplacé
+  // REMOVED: bool _isManualProgressActive = false; // Plus pertinent
   bool _isEditingManualNote = false; // Indique si le slider de note manuelle est actuellement affiché
   bool _manualNoteSelected = false; // Indique si une note manuelle a été explicitement choisie (via slider)
 
@@ -96,16 +97,19 @@ class _JourneePageState extends State<JourneePage> {
   List<Map<String, dynamic>> _filteredFriends = [];
   OverlayEntry? _overlayEntry;
   String _currentMentionQuery = '';
+  // REMOVED: final TextEditingController _commentController = TextEditingController(); // Plus utilisé
+  // REMOVED: final FocusNode _commentFocusNode = FocusNode(); // Plus utilisé
 
   // Pour la republication
   final bool _isRepublishing;
   final JourneeModel? _originalJourneeToRepublish;
 
-  bool _showMentionSuggestions = false;
+  // REMOVED: bool _showMentionSuggestions = false; // Simplifié, géré par l'overlay
   bool _hasHiddenText = false;
 
   // NOUVEAU : Variable d'état pour le statut VIP
   bool _isVip = false;
+  String? _selectedCardColor; // Couleur locale de la carte (null = suivre le global)
 
   // CONSTRUCTEUR
   _JourneePageState({JourneeModel? originalJourneeToRepublish})
@@ -118,22 +122,33 @@ class _JourneePageState extends State<JourneePage> {
     _loadAppBrightness();
     _speech = stt.SpeechToText();
     _loadFriends();
-    _checkVipStatus(); // NOUVEAU : Vérifier le statut VIP de l'utilisateur
+    _checkVipStatus();
 
-    // On initialise la sélection précédente
     _previousSelection = _controller.selection;
 
-    // On renomme l'écouteur pour refléter son double rôle
+    // Seul le contrôleur Quill est écouté maintenant
     _controller.addListener(_handleControllerChanges);
 
     if (widget.journeeToEdit != null) {
       _loadJourneeForEditing();
     } else if (_isRepublishing) {
       _loadJourneeForRepublishing();
+    } else {
+      // On charge l'état par défaut enregistré lors d'une nouvelle création
+      _loadDefaultPublicState(); 
     }
   }
 
-// Assurez-vous aussi de retirer l'écouteur dans dispose
+  // --- NOUVELLES METHODES DE SAUVEGARDE ---
+  Future<void> _loadDefaultPublicState() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        _estPublic = prefs.getBool('defaultVisibilityPublic') ?? false;
+      });
+    }
+  }
+
   @override
   void dispose() {
     _controller.removeListener(_handleControllerChanges);
@@ -144,7 +159,7 @@ class _JourneePageState extends State<JourneePage> {
   }
 
   // THEME: Nouvelle fonction pour charger la préférence de thème
-  Future<void> _loadAppBrightness() async {
+  Future<void>_loadAppBrightness() async {
     try {
       SharedPreferences prefs = await SharedPreferences.getInstance();
       String? themeMode = prefs.getString('themeMode');
@@ -173,7 +188,6 @@ class _JourneePageState extends State<JourneePage> {
   Future<void> _checkVipStatus() async {
     auth.User? currentUser = auth.FirebaseAuth.instance.currentUser;
     if (currentUser != null) {
-      // CORRIGÉ : Appel sans argument, comme requis par l'erreur.
       final subData = await getUserSubscriptionData();
       if (mounted) {
         setState(() {
@@ -186,29 +200,31 @@ class _JourneePageState extends State<JourneePage> {
   void _loadJourneeForRepublishing() {
     final originalJournee = _originalJourneeToRepublish!;
 
-    String contentToRepublish = originalJournee.texte1 ?? originalJournee.texte ?? '';
-    if (!contentToRepublish.endsWith('\n')) {
-      contentToRepublish += '\n';
+    String mainContent = originalJournee.texte1 ?? originalJournee.commentaire ?? '\n';
+    if (mainContent.trim().isEmpty) {
+      mainContent = '\n';
     }
-    _controller.document = quill.Document.fromJson([{'insert': contentToRepublish}]);
+    if (!mainContent.endsWith('\n')) {
+      mainContent += '\n';
+    }
+
+    _controller.document = quill.Document.fromJson([{'insert': mainContent}]);
 
     setState(() {
-      _selectedEmoji = originalJournee.emoji;
-      _commentaire = originalJournee.commentaire;
-      _note = null; // La note IA sera recalculée si l'utilisateur choisit l'analyse
-      _displayImages.addAll(originalJournee.photoUrls);
       _estPublic = originalJournee.estPublic;
-      _isCommentEnabled = true; // Forcer l'affichage du champ de commentaire
-      _isManualProgressActive = false;
-      _isEditingManualNote = false;
-      _manualNoteSelected = false; // Par défaut, pas de note manuelle sélectionnée pour une republication
+      _note = null;
+      _selectedEmoji = originalJournee.emoji;
+      _displayImages.addAll(originalJournee.photoUrls);
+      _selectedCardColor = originalJournee.cardColor;
+      // REMOVED: _isCommentEnabled = true; // Plus besoin de ce flag
     });
   }
 
   void _loadJourneeForEditing() {
     final journee = widget.journeeToEdit!;
 
-    String contentToEdit = journee.texte1 ?? '';
+    // Si la journée originale avait un commentaire, on le met dans le texte principal pour l'édition
+    String contentToEdit = journee.texte1 ?? journee.commentaire ?? '';
     if (!contentToEdit.endsWith('\n')) {
       contentToEdit += '\n';
     }
@@ -217,19 +233,13 @@ class _JourneePageState extends State<JourneePage> {
     setState(() {
       _estPublic = journee.estPublic;
       _selectedEmoji = journee.emoji;
-      if (journee.commentaire != null) {
-        _commentaire = journee.commentaire;
-        _isCommentEnabled = true;
-      } else {
-        _isCommentEnabled = false;
-      }
+      _selectedCardColor = journee.cardColor;
+      // REMOVED: _commentaire et _isCommentEnabled ne sont plus gérés ici.
 
-      // NOUVELLE LOGIQUE : toute note existante est considérée comme une sélection manuelle.
       if (journee.note != null && journee.note!.contains('/')) {
         int? parsedNote = int.tryParse(journee.note!.split('/').first);
         if (parsedNote != null) {
           _note = parsedNote;
-          // On considère la note enregistrée comme un choix manuel pour l'édition
           _manualProgress = _note!.toDouble();
           _manualNoteSelected = true;
         }
@@ -242,7 +252,80 @@ class _JourneePageState extends State<JourneePage> {
         _selectedFriendIds = List<String>.from(journee.hiddenTextFriends!);
         _hasHiddenText = _selectedFriendIds.isNotEmpty;
       }
+
+      // Restaurer les détails de masquage par segment
+      if (journee.hiddenTextDetails != null &&
+          journee.hiddenTextDetails!.isNotEmpty) {
+        _hiddenTextDetails.clear();
+        _hiddenTextDetails.addAll(
+          journee.hiddenTextDetails!.map((d) => {
+            'text': d['text'] as String? ?? '',
+            'friendIds': List<String>.from(d['friendIds'] as List? ?? []),
+          }),
+        );
+        _hasHiddenText = true;
+      }
     });
+
+    // Ré-appliquer le surlignage jaune après que le document soit construit
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final fullText = _controller.document.toPlainText();
+      for (final detail in _hiddenTextDetails) {
+        final text = detail['text'] as String? ?? '';
+        if (text.isEmpty) continue;
+        final idx = fullText.indexOf(text);
+        if (idx >= 0) {
+          _controller.formatText(
+              idx, text.length, quill.Attribute.fromKeyValue('background', '#FFFF00'));
+          _controller.formatText(
+              idx, text.length, quill.Attribute.fromKeyValue('color', '#000000'));
+        }
+      }
+    });
+  }
+
+  // METHODE DE SELECTION DE COULEUR
+  void _showColorPickerDialog() {
+    final colors = {
+      'bleu': Colors.blue, 'vert': Colors.green, 'rouge': Colors.red,
+      'orange': Colors.orange, 'jaune': Colors.yellow, 'violet': Colors.purple, 'rose': Colors.pink, 'blanc': Colors.grey.shade300
+    };
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Couleur de cette publication'),
+        content: Wrap(
+          spacing: 12, runSpacing: 12,
+          children: colors.keys.map((String key) {
+            return GestureDetector(
+              onTap: () {
+                setState(() => _selectedCardColor = key);
+                Navigator.pop(context);
+              },
+              child: Container(
+                width: 40, height: 40,
+                decoration: BoxDecoration(
+                  color: colors[key],
+                  shape: BoxShape.circle,
+                  border: Border.all(color: _selectedCardColor == key ? Colors.black : Colors.transparent, width: 3),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              setState(() => _selectedCardColor = null);
+              Navigator.pop(context);
+            },
+            child: const Text("Suivre le paramètre global"),
+          )
+        ],
+      ),
+    );
   }
 
   // --- MÉTHODES POUR LES FONCTIONNALITÉS ---
@@ -300,7 +383,6 @@ class _JourneePageState extends State<JourneePage> {
     }
   }
 
-  // MODIFIÉ : Ajout d'une vérification de la longueur minimale du texte
   Future<void> _analyserEtEnregistrer(bool avecNoteIA) async {
     final currentText = _controller.document.toPlainText().trim();
     if (currentText.isEmpty) {
@@ -308,41 +390,34 @@ class _JourneePageState extends State<JourneePage> {
       return;
     }
 
-    // CORRIGÉ : Vérification de la longueur minimale du texte
     if (currentText.length < _minTextLength) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Veuillez écrire au moins $_minTextLength caractères pour votre journée.')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Veuillez écrire au moins $_minTextLength caractères pour votre journée afin de procéder à l\'analyse IA.')));
       return;
     }
 
     setState(() => _isLoading = true);
 
     try {
-      // Étape 1: Exécuter les analyses communes (mots-clés et éléments intéressants)
       _motsCles = await _extraireMotsCles(currentText);
       await _enregistrerElementsInteressants(currentText);
 
-      // Étape 2: Obtenir la note si demandé
       if (avecNoteIA) {
         bool noteSuccess = await _obtenirNote(currentText);
         if (!noteSuccess) {
-          // Si l'obtention de la note IA échoue, on continue avec une note par défaut de 50
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Impossible d\'obtenir la note IA, utilisant 50/100 par défaut.'), backgroundColor: Colors.orange));
           }
           setState(() {
             _note = 50;
-            _manualNoteSelected = false; // Ne pas considérer comme sélection manuelle
+            _manualNoteSelected = false;
           });
         }
       } else {
-        // Si on analyse sans note IA (parce qu'une note manuelle est fixée),
-        // on s'assure que la note IA est nulle pour que la note manuelle soit utilisée.
         setState(() {
           _note = null;
         });
       }
 
-      // Étape 3: Enregistrer la journée avec les données obtenues
       await _enregistrerJournee();
 
     } catch (e) {
@@ -356,8 +431,6 @@ class _JourneePageState extends State<JourneePage> {
     }
   }
 
-
-  // LOGIQUE DE SAUVEGARDE (légèrement ajustée pour être appelée par _analyserEtEnregistrer ou directement par le bouton "Enregistrer")
   Future<void> _enregistrerJournee() async {
     auth.User? currentUser = auth.FirebaseAuth.instance.currentUser;
     if (currentUser == null) {
@@ -365,20 +438,36 @@ class _JourneePageState extends State<JourneePage> {
       return;
     }
 
-    final texteOriginal = _controller.document.toPlainText().trim();
-    final String actualContent = _isCommentEnabled ? (_commentaire?.trim() ?? '') : texteOriginal;
+    final textePrincipal = _controller.document.toPlainText().trim();
 
+      // Calcul du texte masqué (parties cachées remplacées par des *)
+      String maskedText = textePrincipal;
+      for (var detail in _hiddenTextDetails) {
+        // trim() pour ignorer les \n de fin que Quill ajoute à la sélection
+        final hiddenText = (detail['text'] as String? ?? '').trim();
+        if (hiddenText.isNotEmpty) {
+          if (maskedText.contains(hiddenText)) {
+            maskedText = maskedText.replaceFirst(hiddenText, '*' * hiddenText.length);
+          } else {
+            // Fallback: normaliser les espaces/sauts de ligne pour la comparaison
+            final hiddenNorm = hiddenText.replaceAll(RegExp(r'\s+'), ' ');
+            final maskedNorm = maskedText.replaceAll(RegExp(r'\s+'), ' ');
+            if (maskedNorm.contains(hiddenNorm)) {
+              maskedText = maskedNorm.replaceFirst(hiddenNorm, '*' * hiddenNorm.length);
+            }
+          }
+        }
+      }
+      final String? texte1Masked = _hiddenTextDetails.isNotEmpty ? maskedText : null;
     // Condition d'enregistrement générale
-    if (actualContent.isEmpty && _displayImages.isEmpty && _selectedEmoji == null && !_manualNoteSelected) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Veuillez écrire quelque chose, laisser un commentaire, ajouter une image, un emoji ou une note manuelle.')));
+    if (textePrincipal.isEmpty && _displayImages.isEmpty && _selectedEmoji == null && !_manualNoteSelected) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Veuillez écrire quelque chose, ajouter une image, un emoji ou une note manuelle.')));
       return;
     }
 
-    // Afficher le chargement si ce n'est pas déjà géré par _analyserEtEnregistrer
     if (!_isLoading) setState(() => _isLoading = true);
 
     try {
-      // 1. Upload des images
       List<String> uploadedImageUrls = [];
       for (final item in _displayImages) {
         if (item is XFile) {
@@ -396,40 +485,57 @@ class _JourneePageState extends State<JourneePage> {
         }
       }
 
-      // 2. Logique de note
       DocumentSnapshot userDoc = await FirebaseFirestore.instance.collection('users').doc(currentUser.uid).get();
-      int qualiteDeVieActuelle = (userDoc.data() as Map<String, dynamic>?)?['qualiteDeVieActuelle'] ?? 50;
+
+      final userData = userDoc.data() as Map<String, dynamic>? ?? {};
+      final int qualiteDeVieActuelle = userData['qualiteDeVieActuelle'] ?? 50;
+      final String? userCountry = userData['country'];
 
       int noteFinale;
-      if (_manualNoteSelected) { // L'utilisateur a explicitement choisi une note manuelle (via le slider)
+      if (_manualNoteSelected) {
         noteFinale = _manualProgress.round();
-      } else { // Pas de note manuelle, on utilise la note IA (ou 50 si pas d'IA)
-        noteFinale = _note ?? 50; // _note est la note de l'IA si elle a été obtenue, sinon 50
+      } else {
+        noteFinale = _note ?? 50;
       }
 
       int nouvelleQualiteDeVie = ((qualiteDeVieActuelle + noteFinale) / 2).round();
       String noteToSave = '$noteFinale/100';
 
-
-      // 3. Construction de l'objet de données
       Map<String, dynamic> journeeData = {
-        'texte1': _isCommentEnabled ? null : texteOriginal,
+        'texte1': textePrincipal.isNotEmpty ? textePrincipal : null, // Store if not empty
+        'texte1Masked': texte1Masked, // Version avec * pour les non-autorisés
+        'hiddenTextDetails': _hiddenTextDetails.isNotEmpty
+            ? _hiddenTextDetails.map((d) => {
+                'text': d['text'],
+                'friendIds': List<String>.from(d['friendIds'] as List? ?? []),
+              }).toList()
+            : null,
         'estPublic': _estPublic,
-        'date': Timestamp.now(),
+
+        // 👇 LA CORRECTION EST ICI 👇
+        'date': widget.journeeToEdit != null 
+            ? Timestamp.fromDate(widget.journeeToEdit!.date) 
+            : Timestamp.now(),
+        // 👆 FIN DE LA CORRECTION 👆
+
         'userId': currentUser.uid,
         'emoji': _selectedEmoji,
-        'commentaire': _isCommentEnabled ? _commentaire : null,
+        'commentaire': null, // REMOVED: Commentaire n'est plus un champ distinct de la UI
         'note': noteToSave,
-        'motsCles': _motsCles, // Mots-clés déjà extraits ou vides si pas de texte
+        'motsCles': _motsCles,
         'photoUrls': uploadedImageUrls,
+        'cardColor': _selectedCardColor,
         'hiddenTextFriends': _selectedFriendIds.isNotEmpty ? _selectedFriendIds : null,
+        'mentionedUserIds': _mentionedUserIds,
         'isRepost': _isRepublishing,
         'repostedFromUserId': _isRepublishing ? _originalJourneeToRepublish!.userId : null,
         'repostedFromUserName': _isRepublishing ? await _getUsernameById(_originalJourneeToRepublish!.userId!) : null,
-        'mentionedUserIds': _mentionedUserIds,
       };
 
-      // 4. Sauvegarde dans Firestore
+      if (userCountry != null && userCountry.isNotEmpty) {
+        journeeData['userCountry'] = userCountry;
+      }
+
       String? journeeId;
       if (widget.journeeToEdit != null) {
         journeeId = widget.journeeToEdit!.id;
@@ -439,18 +545,27 @@ class _JourneePageState extends State<JourneePage> {
         journeeId = docRef.id;
       }
 
-      // MODIFIÉ : La logique de résumé est retirée. Le souvenir est créé avec le texte intégral.
       if (_postAsSouvenir) {
+        // Générer un résumé court (2-3 phrases max) en fonction de la préférence IA
+        String souvenirTexte = textePrincipal;
+        try {
+          final String? generated = await _generateSouvenirSummary(textePrincipal);
+          if (generated != null && generated.trim().isNotEmpty) {
+            souvenirTexte = generated.trim();
+          }
+        } catch (e) {
+          print('Erreur génération résumé souvenir : $e');
+        }
+
         await FirebaseFirestore.instance.collection('souvenirs').add({
           'userId': currentUser.uid,
           'journeeId': journeeId,
           'date': Timestamp.now(),
-          'texte': texteOriginal, // Texte complet de la journée
+          'texte': souvenirTexte,
           'photoUrls': uploadedImageUrls,
           'emoji': _selectedEmoji,
-          'commentaire': _commentaire, // Le commentaire si activé
-          'qualite': SouvenirQualite.bonheur.toString(), // Vous pouvez adapter la qualité
-          // Le champ 'summary' a été retiré.
+          'commentaire': null, // Le commentaire n'est plus un champ distinct
+          'qualite': SouvenirQualite.bonheur.toString(),
           'isRepost': _isRepublishing,
           'repostedFromUserId': _isRepublishing ? _originalJourneeToRepublish!.userId : null,
         });
@@ -459,11 +574,16 @@ class _JourneePageState extends State<JourneePage> {
       await FirebaseFirestore.instance.collection('users')
           .doc(currentUser.uid)
           .update({'qualiteDeVieActuelle': nouvelleQualiteDeVie});
+
+      // Classify excerpts into biographical themes (fire-and-forget)
+      if (textePrincipal.isNotEmpty && journeeId != null) {
+        _classifierExtraitsParThemes(textePrincipal, journeeId, widget.journeeToEdit?.date ?? DateTime.now());
+      }
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
             content: Text('Journée enregistrée !'),
             backgroundColor: Colors.green));
-        // MODIFIÉ : On renvoie 'true' pour indiquer que la sauvegarde a réussi.
         if (Navigator.canPop(context)) {
           Navigator.pop(context, true);
         } else {
@@ -487,8 +607,6 @@ class _JourneePageState extends State<JourneePage> {
     }
   }
 
-
-  // AJOUTÉ : Copie de la logique d'extraction des éléments intéressants depuis home_page.dart
   String normaliserId(String texte) {
     final Map<String, String> accentsMap = {
       'à': 'a', 'á': 'a', 'â': 'a', 'ã': 'a', 'ä': 'a',
@@ -522,16 +640,13 @@ class _JourneePageState extends State<JourneePage> {
     return result;
   }
 
-  // AJOUTÉ : Copie de la logique principale de sauvegarde des éléments
   Future<void> _enregistrerElementsInteressants(String texte) async {
     auth.User? currentUser = auth.FirebaseAuth.instance.currentUser;
     if (currentUser == null) return;
 
-
-
     print('Début de l\'analyse pour catégorisation...');
 
-    const url = 'https://api.deepseek.com/v1/chat/completions';
+    const url = 'https://api.deepinfra.com/v1/openai/chat/completions';
     try {
       final response = await http.post(
         Uri.parse(url),
@@ -540,7 +655,7 @@ class _JourneePageState extends State<JourneePage> {
           'Authorization': 'Bearer $DEEPSEEK_API_KEY',
         },
         body: jsonEncode({
-          'model': 'deepseek-chat',
+          'model': await resolveAiModel(),
           'messages': [
             {
               'role': 'user',
@@ -566,7 +681,6 @@ class _JourneePageState extends State<JourneePage> {
       );
 
       if (response.statusCode == 200) {
-        // CORRIGÉ : Forcer le décodage en UTF-8 pour éviter les problèmes de caractères
         final data = jsonDecode(utf8.decode(response.bodyBytes));
         String elementsText = data['choices']?[0]['message']['content']?.toString() ?? '';
         elementsText = elementsText.trim().replaceAll(RegExp(r'^```json\s*|\s*```$'), '');
@@ -574,9 +688,15 @@ class _JourneePageState extends State<JourneePage> {
         Map<String, dynamic>? parsedElements;
         try {
           parsedElements = jsonDecode(elementsText);
-        } catch (e) {
-          print("Erreur de parsing JSON pour les éléments intéressants: $e");
-          return;
+        } catch (_) {
+          try {
+            final sanitized = elementsText.replaceAllMapped(
+                RegExp(r'[\x00-\x1F]'), (m) => ' ');
+            parsedElements = jsonDecode(sanitized);
+          } catch (e) {
+            print("Erreur de parsing JSON pour les éléments intéressants: $e");
+            return;
+          }
         }
 
         if (parsedElements != null && parsedElements.containsKey('elements')) {
@@ -644,11 +764,21 @@ class _JourneePageState extends State<JourneePage> {
     }
   }
 
+  /// Génère un résumé court (2-3 phrases max) adapté à la préférence IA de l'utilisateur.
+  Future<String?> _generateSouvenirSummary(String texte) async {
+    if (texte.trim().isEmpty) return null;
 
-  // NOUVELLE MÉTHODE : _extraireMotsCles
-  Future<List<String>> _extraireMotsCles(String texte) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String iaPreference = prefs.getString('iaPreference') ?? 'ressenti';
 
-    const url = 'https://api.deepseek.com/v1/chat/completions';
+    String instruction;
+    if (iaPreference == 'ressenti') {
+      instruction = 'Reformule ce texte en un résumé très court (2 à 3 phrases maximum) en mettant l\'accent sur le ressenti émotionnel et ce qui a le plus compté dans la journée. Utilise un ton chaleureux et concis.';
+    } else {
+      instruction = 'Reformule ce texte en un résumé très court (2 à 3 phrases maximum) en focalisant sur les événements et la qualité générale de la journée. Sois précis et concis.';
+    }
+
+    const url = 'https://api.deepinfra.com/v1/openai/chat/completions';
     try {
       final response = await http.post(
         Uri.parse(url),
@@ -657,33 +787,206 @@ class _JourneePageState extends State<JourneePage> {
           'Authorization': 'Bearer $DEEPSEEK_API_KEY',
         },
         body: jsonEncode({
-          'model': 'deepseek-chat',
+          'model': await resolveAiModel(),
           'messages': [
-            {
-              'role': 'user',
-              'content':
-              '''Analyse ce texte et extrais exactement 5 mots-clés qui résument les thèmes principaux de la journée. Réponds uniquement avec une liste JSON de 5 mots, sans texte supplémentaire, ni préambule, ni postface. Assure-toi que la liste 'mots_cles' est toujours présente, même vide si aucun mot-clé n'est pertinent:
-                {
-                  "mots_cles": ["mot1", "mot2", "mot3", "mot4", "mot5"]
-                }
-                Texte à analyser : $texte'''
-            }
+            {'role': 'system', 'content': 'Tu es un assistant qui résume du texte en français de manière claire et concise.'},
+            {'role': 'user', 'content': '$instruction\n\nTexte : $texte'},
           ],
-          'max_tokens': 100,
+          'max_tokens': 150,
+          'temperature': 0.6,
         }),
       );
 
       if (response.statusCode == 200) {
-        // CORRIGÉ : Forcer le décodage en UTF-8 pour éviter les problèmes de caractères
+        final data = jsonDecode(utf8.decode(response.bodyBytes));
+        final content = data['choices']?[0]['message']?['content']?.toString();
+        if (content == null) return null;
+        String result = content.trim();
+        // Supprimer les éventuels délimiteurs de code
+        result = result.replaceAll(RegExp(r'^```(?:json)?\s*|\s*```\s*\$', multiLine: false), '');
+        // Forcer à 2-3 phrases max : couper après 3 points.
+        final sentences = RegExp(r'([^.!?]+[.!?])').allMatches(result).map((m) => m.group(0)!.trim()).toList();
+        if (sentences.isEmpty) return result;
+        final limited = sentences.take(3).join(' ');
+        return limited;
+      } else {
+        print('Erreur API résumé souvenir: ${response.body}');
+        return null;
+      }
+    } catch (e) {
+      print('Exception génération résumé souvenir: $e');
+      return null;
+    }
+  }
+
+  /// Classifie des extraits de la journée dans des thèmes/sous-thèmes biographiques sur Firebase.
+  Future<void> _classifierExtraitsParThemes(String texte, String journeeId, DateTime dateEvent) async {
+    auth.User? currentUser = auth.FirebaseAuth.instance.currentUser;
+    if (currentUser == null || texte.isEmpty) return;
+    debugPrint('[THEME_CLASSIFY] ── Début classification journée $journeeId (${texte.length} chars) ──');
+    const url = 'https://api.deepinfra.com/v1/openai/chat/completions';
+    try {
+      final response = await http.post(
+        Uri.parse(url),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $DEEPSEEK_API_KEY',
+        },
+        body: jsonEncode({
+          'model': await resolveAiModel(),
+          'temperature': 0.1,
+          'messages': [
+            {
+              'role': 'system',
+              'content': 'Tu es un assistant expert en analyse textuelle. Tu réponds UNIQUEMENT avec du JSON valide, sans aucun texte avant ou après le JSON. Ne fournis jamais d\'explication, de commentaire ou de texte en dehors de l\'objet JSON demandé.',
+            },
+            {
+              'role': 'user',
+              'content': '''Analyse ce texte de journal intime et découpe-le en segments sémantiques significatifs. Pour CHAQUE segment pertinent :
+- Extrais le passage exact (une phrase ou groupe de phrases cohérentes).
+- Attribue un thème principal en UN seul mot (catégorie large : famille, travail, amour, santé, amis, loisirs, voyage, école, argent, spiritualité, enfance, nature, créativité, etc.).
+- Crée un sous-thème court et très descriptif de 3 à 7 mots (formule émotionnelle ou contextuelle précise, exemples : "Malheur à la maternelle", "Bonheur au nouveau travail", "Dispute avec un ami proche", "Peur de l\'avenir professionnel", "Fierté après une réussite scolaire", "Deuil d\'un proche aimé", "Nouveau départ dans une ville inconnue").
+
+RÈGLE ABSOLUE : Multiplie les extraits. Chaque émotion, événement ou contexte important = un extrait séparé avec son propre sous-thème unique. Ne regroupe pas des événements différents dans un seul extrait.
+
+Réponds UNIQUEMENT avec ce JSON, sans aucun autre texte :
+{"extraits":[{"theme":"famille","sous_theme":"Dispute avec la mère ce matin","extrait":"passage exact tiré du texte"}]}
+
+Texte à analyser : $texte'''
+            }
+          ],
+          'max_tokens': 2000,
+        }),
+      );
+      debugPrint('[THEME_CLASSIFY] Réponse API: status=${response.statusCode}');
+      if (response.statusCode != 200) {
+        debugPrint('[THEME_CLASSIFY] ERREUR API: ${response.body}');
+        return;
+      }
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      String raw = (data['choices']?[0]['message']['content'] as String? ?? '').trim();
+      debugPrint('[THEME_CLASSIFY] Réponse brute IA: ${raw.length > 200 ? raw.substring(0, 200) : raw}');
+      raw = raw.replaceAll(RegExp(r'^```json\s*|\s*```$'), '');
+      final jsonMatch = RegExp(r'\{.*\}', dotAll: true).firstMatch(raw);
+      if (jsonMatch == null) {
+        debugPrint('[THEME_CLASSIFY] Impossible de trouver le JSON dans la réponse');
+        return;
+      }
+      Map<String, dynamic>? parsed;
+      try {
+        parsed = jsonDecode(jsonMatch.group(0)!);
+      } catch (_) {
+        try {
+          final sanitized = jsonMatch.group(0)!.replaceAllMapped(
+              RegExp(r'[\x00-\x1F]'), (m) => ' ');
+          parsed = jsonDecode(sanitized);
+        } catch (e) {
+          debugPrint('[THEME_CLASSIFY] Erreur parsing JSON: $e');
+          return;
+        }
+      }
+      final extraits = parsed?['extraits'] as List?;
+      if (extraits == null || extraits.isEmpty) {
+        debugPrint('[THEME_CLASSIFY] Aucun extrait retourné par l\'IA');
+        return;
+      }
+      debugPrint('[THEME_CLASSIFY] ${extraits.length} extraits à enregistrer');
+
+      final db = FirebaseFirestore.instance;
+      int saved = 0;
+      for (final extrait in extraits) {
+        final theme = (extrait['theme'] as String? ?? '').trim();
+        final sousTheme = (extrait['sous_theme'] as String? ?? '').trim();
+        final texteExtrait = (extrait['extrait'] as String? ?? '').trim();
+        if (theme.isEmpty || sousTheme.isEmpty || texteExtrait.isEmpty) continue;
+        final themeId = normaliserId(theme);
+        final sousThemeId = normaliserId(sousTheme);
+        debugPrint('[THEME_CLASSIFY] → thème="$theme" ($themeId) | sous-thème="$sousTheme" ($sousThemeId)');
+        final themeRef = db
+            .collection('users')
+            .doc(currentUser.uid)
+            .collection('themes_biographiques')
+            .doc(themeId);
+        await themeRef.set({'nom': theme, 'createdAt': Timestamp.now()}, SetOptions(merge: true));
+        final sousThemeRef = themeRef.collection('sous_themes').doc(sousThemeId);
+        await sousThemeRef.set(
+            {'nom': sousTheme, 'updatedAt': Timestamp.now()}, SetOptions(merge: true));
+
+        final startOfDay = DateTime(dateEvent.year, dateEvent.month, dateEvent.day);
+        final endOfDay = startOfDay.add(const Duration(days: 1));
+
+        final existingSnap = await sousThemeRef.collection('extraits')
+            .where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
+            .where('date', isLessThan: Timestamp.fromDate(endOfDay))
+            .limit(1)
+            .get();
+
+        if (existingSnap.docs.isNotEmpty) {
+          final doc = existingSnap.docs.first;
+          final existingTexte = doc.get('texte') as String? ?? '';
+          final mergedTexte = existingTexte + '\n' + texteExtrait;
+          await doc.reference.update({
+             'texte': mergedTexte,
+             'lastAnalyzedAutobiographie': FieldValue.delete(), // Mettre à null pour repasser en IA si besoin
+             'journeeId': journeeId,
+             'sourceType': 'journee_et_souvenir', // On indique que ça peut être mixte
+          });
+        } else {
+          await sousThemeRef.collection('extraits').add({
+            'texte': texteExtrait,
+            'journeeId': journeeId,
+            'sourceType': 'journee',
+            'date': Timestamp.fromDate(dateEvent),
+          });
+        }
+        saved++;
+      }
+      debugPrint('[THEME_CLASSIFY] ✓ $saved extraits enregistrés dans themes_biographiques (journée)');
+    } catch (e) {
+      debugPrint('[THEME_CLASSIFY] EXCEPTION: $e');
+    }
+  }
+
+  Future<List<String>> _extraireMotsCles(String texte) async {
+    const url = 'https://api.deepinfra.com/v1/openai/chat/completions';
+    try {
+      final response = await http.post(
+        Uri.parse(url),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $DEEPSEEK_API_KEY',
+        },
+        body: jsonEncode({
+          'model': await resolveAiModel(),
+          'temperature': 0.1,
+          'response_format': {'type': 'json_object'},
+          'messages': [
+            {
+              'role': 'system',
+              'content': 'Tu es un assistant qui répond UNIQUEMENT avec du JSON valide. Aucun texte avant ou après le JSON.',
+            },
+            {
+              'role': 'user',
+              'content': 'Extrais 5 mots-clés importants de ce texte. Si tu en trouves plus, choisis les 5 plus importants. Réponds UNIQUEMENT avec ce JSON : {"mots_cles":["mot1","mot2","mot3","mot4","mot5"]}\n\nTexte : $texte'
+            }
+          ],
+          'max_tokens': 150,
+        }),
+      );
+
+      if (response.statusCode == 200) {
         final data = jsonDecode(utf8.decode(response.bodyBytes));
         String content = data['choices']?[0]['message']['content']?.toString() ?? '';
 
+        // Strip invisible unicode chars (zero-width space, BOM, etc.)
+        content = content.replaceAll(RegExp(r'[\u200B-\u200D\uFEFF\u00A0]'), '').trim();
+
         if (content.isEmpty) {
           print('Contenu vide dans la réponse des mots-clés');
-          return List.generate(5, (index) => 'défaut${index + 1}');
+          return _extraireMotsClesLocalement(texte);
         }
 
-        content = content.trim().replaceAll(RegExp(r'^```json\s*|\s*```$'), '');
+        content = content.replaceAll(RegExp(r'^```json\s*|\s*```$', multiLine: false), '');
 
         try {
           final motsClesParsed = jsonDecode(content);
@@ -700,23 +1003,45 @@ class _JourneePageState extends State<JourneePage> {
             return extracted;
           } else {
             print('Format de réponse invalide pour mots-clés: $content');
-            return List.generate(5, (index) => 'défaut${index + 1}');
+            return _extraireMotsClesLocalement(texte);
           }
         } catch (e) {
           print('Erreur de parsing JSON pour mots-clés : $e, contenu : $content');
-          return List.generate(5, (index) => 'défaut${index + 1}');
+          // Fallback: extract top words directly from the original text
+          return _extraireMotsClesLocalement(texte);
         }
       } else {
         print('Erreur API DeepSeek pour mots-clés : ${response.statusCode}');
-        return List.generate(5, (index) => 'erreur${index + 1}');
+        return _extraireMotsClesLocalement(texte);
       }
     } catch (e) {
       print('Erreur lors de l\'extraction des mots-clés : $e');
-      return List.generate(5, (index) => 'erreur${index + 1}');
+      return _extraireMotsClesLocalement(texte);
     }
   }
 
-  // SUPPRIMÉ : La méthode _summarizeForSouvenir n'est plus nécessaire.
+  /// Fallback: extract the 5 most frequent meaningful words directly from [texte].
+  List<String> _extraireMotsClesLocalement(String texte) {
+    const stopWords = {
+      'je', 'tu', 'il', 'elle', 'nous', 'vous', 'ils', 'elles', 'me', 'te',
+      'se', 'le', 'la', 'les', 'un', 'une', 'des', 'du', 'de', 'et', 'ou',
+      'mais', 'donc', 'or', 'ni', 'car', 'que', 'qui', 'quoi', 'dont', 'où',
+      'est', 'sont', 'était', 'avec', 'dans', 'sur', 'pour', 'par', 'en',
+      'au', 'aux', 'ce', 'cet', 'cette', 'ces', 'mon', 'ton', 'son', 'ma',
+      'ta', 'sa', 'mes', 'tes', 'ses', 'pas', 'plus', 'très', 'bien', 'tout',
+      'aussi', 'si', 'ne', 'ai', 'as', 'a', 'our', 'été', 'avoir', 'être',
+    };
+    final freq = <String, int>{};
+    for (final word in texte.toLowerCase().split(RegExp(r'[^a-zàâäéèêëîïôùûüç]+'))) {
+      if (word.length >= 4 && !stopWords.contains(word)) {
+        freq[word] = (freq[word] ?? 0) + 1;
+      }
+    }
+    final sorted = freq.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
+    final result = sorted.take(5).map((e) => e.key).toList();
+    while (result.length < 5) result.add('mot${result.length + 1}');
+    return result;
+  }
 
   // --- WIDGETS DE CONSTRUCTION DE L'UI ---
   @override
@@ -762,7 +1087,7 @@ class _JourneePageState extends State<JourneePage> {
                     const SizedBox(height: 16),
                     _buildPostAsSouvenirSwitch(isDarkMode),
                     const SizedBox(height: 24),
-                    _buildSaveButtons(), // <- WIDGET MODIFIÉ
+                    _buildSaveButtons(),
                   ],
                 ),
               ),
@@ -790,10 +1115,9 @@ class _JourneePageState extends State<JourneePage> {
               child: quill.QuillEditor.basic(
                 controller: _controller,
                 focusNode: _focusNode,
-                configurations: quill.QuillEditorConfigurations(
+                config: quill.QuillEditorConfig(
                   placeholder: _isRepublishing
                       ? 'Texte original (non modifiable)'
-                  // MODIFIÉ : Le message inclut la limite de caractères
                       : 'Écrivez votre journée ici (minimum $_minTextLength caractères)...',
                 ),
               ),
@@ -878,7 +1202,6 @@ class _JourneePageState extends State<JourneePage> {
     );
   }
 
-  // CORRIGÉ : La structure a été simplifiée pour éviter le RenderFlex overflow
   Widget _buildActionToolbar(bool isDarkMode) {
     return Card(
       elevation: 2,
@@ -910,14 +1233,22 @@ class _JourneePageState extends State<JourneePage> {
                   : (isDarkMode ? Colors.white70 : Colors.grey.shade700),
               tooltip: 'Masquer du texte',
             ),
-            const Spacer(), // Le Spacer pousse les éléments suivants vers la droite
+            IconButton(
+              onPressed: _isRepublishing ? null : _showColorPickerDialog,
+              icon: const Icon(Icons.palette_outlined),
+              color: _selectedCardColor != null 
+                  ? Colors.blue
+                  : (isDarkMode ? Colors.white70 : Colors.grey.shade700),
+              tooltip: 'Couleur de la publication',
+            ),
+            const Spacer(),
             Text(
               _estPublic ? 'Public' : 'Privé',
               style: TextStyle(color: isDarkMode ? Colors.white : Colors.black),
             ),
             Switch(
               value: _estPublic,
-              onChanged: (value) => setState(() => _estPublic = value),
+              onChanged: _togglePublicState, // <-- ON UTILISE LA NOUVELLE FONCTION ICI
               activeColor: Colors.blue,
             ),
           ],
@@ -926,7 +1257,14 @@ class _JourneePageState extends State<JourneePage> {
     );
   }
 
-  // MODIFIÉ : La logique des émojis est maintenant indépendante de la note manuelle.
+  void _togglePublicState(bool value) async {
+    setState(() {
+      _estPublic = value;
+    });
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('defaultVisibilityPublic', value);
+  }
+
   Widget _buildEmojiAndNoteCard(bool isDarkMode) {
     return Card(
       elevation: 2,
@@ -937,88 +1275,43 @@ class _JourneePageState extends State<JourneePage> {
         child: Column(
           children: [
             // Section Emojis
-            AnimatedOpacity(
-              opacity: _isCommentEnabled ? 0.5 : 1.0,
-              duration: const Duration(milliseconds: 300),
-              child: AbsorbPointer( // Désactiver les emojis si le champ commentaire est actif
-                absorbing: _isCommentEnabled,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: _emojis.map((emojiData) {
-                    final isSelected = _selectedEmoji == emojiData['emoji'];
-                    return GestureDetector(
-                      onTap: () {
-                        // NOUVELLE LOGIQUE SIMPLE : sélectionne/désélectionne l'émoji sans aucun autre effet.
-                        setState(() {
-                          if (_selectedEmoji == emojiData['emoji']) {
-                            _selectedEmoji = null;
-                          } else {
-                            _selectedEmoji = emojiData['emoji'];
-                          }
-                        });
-                      },
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                            color: isSelected
-                                ? Colors.blue.withOpacity(0.2)
-                                : Colors.transparent,
-                            shape: BoxShape.circle),
-                        child: Text(emojiData['emoji']!, style: TextStyle(fontSize: isSelected ? 34 : 30)),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: _emojis.map((emojiData) {
+                final isSelected = _selectedEmoji == emojiData['emoji'];
+                return GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      if (_selectedEmoji == emojiData['emoji']) {
+                        _selectedEmoji = null;
+                      } else {
+                        _selectedEmoji = emojiData['emoji'];
+                      }
+                    });
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                        color: isSelected
+                            ? Colors.blue.withOpacity(0.2)
+                            : Colors.transparent,
+                        shape: BoxShape.circle),
+                    child: Text(emojiData['emoji']!, style: TextStyle(fontSize: isSelected ? 34 : 30)),
+                  ),
+                );
+              }).toList(),
             ),
             const SizedBox(height: 16),
-
-            if (_isRepublishing)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12.0),
-                child: Text(
-                  "Ajoutez votre commentaire sur ce souvenir :",
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w500,
-                    color: isDarkMode ? Colors.white : Colors.black,
-                  ),
-                ),
-              ),
-            if (_isCommentEnabled)
-              TextField(
-                controller: TextEditingController(text: _commentaire),
-                onChanged: (value) => setState(() => _commentaire = value),
-                style: TextStyle(color: isDarkMode ? Colors.white : Colors.black),
-                decoration: InputDecoration(
-                  labelText: 'Votre commentaire ici...',
-                  labelStyle: TextStyle(color: isDarkMode ? Colors.white70 : Colors.grey.shade600),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                  filled: true,
-                  fillColor: isDarkMode ? Colors.grey.shade800 : Colors.grey.shade100,
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(color: isDarkMode ? Colors.grey.shade600 : Colors.grey.shade300),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: Colors.blue),
-                  ),
-                ),
-              )
-            else
-              _buildNoteManualSection(isDarkMode),
+            _buildNoteManualSection(isDarkMode),
           ],
         ),
       ),
     );
   }
 
-  // MODIFIÉ : L'activation de la note manuelle ne désélectionne plus l'émoji.
   Widget _buildNoteManualSection(bool isDarkMode) {
     if (_isEditingManualNote) {
-      // Afficher le slider et le bouton "Annuler"
       return Column(
         children: [
           Row(
@@ -1034,8 +1327,8 @@ class _JourneePageState extends State<JourneePage> {
                   onChanged: (double value) {
                     setState(() {
                       _manualProgress = value;
-                      _manualNoteSelected = true;     // Confirme qu'une note manuelle est sélectionnée
-                      _note = null;                 // Réinitialise la note IA
+                      _manualNoteSelected = true;
+                      _note = null;
                     });
                   },
                   activeColor: Colors.blue,
@@ -1060,9 +1353,9 @@ class _JourneePageState extends State<JourneePage> {
               TextButton(
                 onPressed: () {
                   setState(() {
-                    _isEditingManualNote = false; // Cache le slider
-                    _manualNoteSelected = false;  // Annule la sélection manuelle
-                    _manualProgress = 50.0;     // Réinitialiser à la valeur par défaut
+                    _isEditingManualNote = false;
+                    _manualNoteSelected = false;
+                    _manualProgress = 50.0;
                   });
                 },
                 child: const Text('Annuler', style: TextStyle(color: Colors.red)),
@@ -1072,16 +1365,14 @@ class _JourneePageState extends State<JourneePage> {
         ],
       );
     } else {
-      // Afficher le bouton "Note Manuelle"
       return OutlinedButton.icon(
         icon: const Icon(Icons.edit_note, size: 20),
         label: Text(_manualNoteSelected ? 'Note Manuelle: ${_manualProgress.round()}/100' : "Note Manuelle"),
         onPressed: () {
           setState(() {
-            _isEditingManualNote = true;      // Affiche le slider
-            _manualNoteSelected = true;       // Indique qu'une note manuelle est en cours de sélection
-            // On ne touche plus à _selectedEmoji, les deux peuvent coexister
-            _note = null;                   // Réinitialise la note IA
+            _isEditingManualNote = true;
+            _manualNoteSelected = true;
+            _note = null;
           });
         },
         style: OutlinedButton.styleFrom(
@@ -1093,10 +1384,8 @@ class _JourneePageState extends State<JourneePage> {
     }
   }
 
-
-  // MODIFIÉ : Le switch vérifie maintenant le statut VIP
   Widget _buildPostAsSouvenirSwitch(bool isDarkMode) {
-    final bool canPostAsSouvenir = (_controller.document.toPlainText().trim().isNotEmpty || (_commentaire?.trim().isNotEmpty ?? false) || _displayImages.isNotEmpty || _selectedEmoji != null || _manualNoteSelected);
+    final bool canPostAsSouvenir = (_controller.document.toPlainText().trim().isNotEmpty || _displayImages.isNotEmpty || _selectedEmoji != null || _manualNoteSelected);
 
     return Card(
       elevation: 2,
@@ -1105,7 +1394,12 @@ class _JourneePageState extends State<JourneePage> {
       child: SwitchListTile(
         title: Row(
           children: [
-            const Text("Poster en tant que souvenir"),
+            const Flexible(
+              child: Text(
+                "Poster en tant que souvenir",
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
             const SizedBox(width: 8),
             Icon(Icons.star, color: Colors.amber.shade700, size: 16),
           ],
@@ -1118,18 +1412,8 @@ class _JourneePageState extends State<JourneePage> {
         onChanged: canPostAsSouvenir
             ? (value) {
           if (value && !_isVip) {
-            // CORRIGÉ : Appel avec 2 arguments : context et une fonction de rappel.
-            showVipPromotionPopup(context, () {
-              // Ce code est exécuté si l'utilisateur devient VIP depuis la popup.
-              if (mounted) {
-                setState(() {
-                  _isVip = true;
-                  _postAsSouvenir = true; // Activer le switch
-                });
-              }
-            } as String);
+            showVipPromotionPopup(context, "Poster en tant que souvenir");
           } else {
-            // Si l'utilisateur est VIP ou s'il désactive le switch
             setState(() => _postAsSouvenir = value);
           }
         }
@@ -1148,29 +1432,26 @@ class _JourneePageState extends State<JourneePage> {
     );
   }
 
-  // MODIFIÉ : La logique d'affichage des boutons a été entièrement revue.
   Widget _buildSaveButtons() {
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator());
     }
 
-    final bool hasTextToAnalyze = _controller.document.toPlainText().trim().isNotEmpty;
-    final bool hasAnyContent = hasTextToAnalyze ||
-        (_commentaire?.trim().isNotEmpty ?? false) ||
-        _displayImages.isNotEmpty ||
-        _selectedEmoji != null ||
-        _manualNoteSelected;
+    final bool hasTextInEditor = _controller.document.toPlainText().trim().isNotEmpty;
+    final bool hasEnoughTextForIA = hasTextInEditor && _controller.document.toPlainText().trim().length >= _minTextLength;
+    final bool hasAnyContent = hasTextInEditor || _displayImages.isNotEmpty || _selectedEmoji != null || _manualNoteSelected;
+
 
     // CAS 1 : Une note manuelle a été sélectionnée par l'utilisateur.
     if (_manualNoteSelected) {
       return ElevatedButton(
         onPressed: hasAnyContent ? () {
-          // S'il y a du texte, on lance l'analyse (mots-clés, etc.) mais sans générer de note IA.
+          // Si le texte est suffisant pour l'IA, on lance l'analyse (mots-clés, etc.) mais sans générer de note IA.
           // La fonction _enregistrerJournee utilisera la note manuelle (_manualProgress).
-          if (hasTextToAnalyze) {
+          if (hasEnoughTextForIA) {
             _analyserEtEnregistrer(false);
           } else {
-            // S'il n'y a pas de texte (ex: juste une photo et une note), on enregistre directement.
+            // S'il n'y a pas assez de texte (ou aucun texte), on enregistre directement sans analyse IA.
             _enregistrerJournee();
           }
         } : null,
@@ -1181,14 +1462,13 @@ class _JourneePageState extends State<JourneePage> {
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
         ),
-        // Le texte du bouton est "Analyser et enregistrer sans note IA" comme demandé.
-        child: const Text('Analyser et enregistrer sans note IA'),
+        child: const Text('Enregistrer sans note IA'),
       );
     }
     // CAS 2 : Aucune note manuelle n'a été sélectionnée.
     else {
-      // S'il y a du texte à analyser, on affiche le bouton par défaut qui analyse ET note avec l'IA.
-      if (hasTextToAnalyze) {
+      // S'il y a assez de texte pour l'IA, on affiche le bouton par défaut qui analyse ET note avec l'IA.
+      if (hasEnoughTextForIA) {
         return ElevatedButton(
           onPressed: () => _analyserEtEnregistrer(true),
           style: ElevatedButton.styleFrom(
@@ -1198,11 +1478,10 @@ class _JourneePageState extends State<JourneePage> {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
-          // Le texte du bouton est "Analyser et noter avec IA" comme demandé.
           child: const Text('Analyser et noter avec IA'),
         );
       }
-      // S'il n'y a pas de texte (mais d'autres contenus), un simple bouton "Enregistrer" est affiché.
+      // S'il n'y a pas assez de texte (mais d'autres contenus), un simple bouton "Enregistrer" est affiché.
       else {
         return ElevatedButton(
           onPressed: hasAnyContent ? _enregistrerJournee : null,
@@ -1213,38 +1492,39 @@ class _JourneePageState extends State<JourneePage> {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
-          child: const Text('Enregistrer'),
+          child: Text(hasTextInEditor ? 'Enregistrer (texte trop court pour IA)' : 'Enregistrer'),
         );
       }
     }
   }
 
 
-  // 5. Améliorer le popup pour un meilleur design :
-  void _toggleHiddenTextVisibility(int textIndex) {
+  void _toggleHiddenTextVisibility(int textIndex) async {
+    final hiddenDetail = _hiddenTextDetails[textIndex];
+    final hiddenText = hiddenDetail['text'] as String? ?? '';
+
+    // Charger la liste complète des amis
+    List<Map<String, dynamic>> friends = _allFriends.isNotEmpty
+        ? _allFriends
+        : await _getFriendsList();
+    if (!mounted) return;
+
+    List<String> tempFriendIds = List<String>.from(hiddenDetail['friendIds'] as List? ?? []);
+
     showDialog(
       context: context,
       builder: (BuildContext context) {
-        return ValueListenableBuilder<Brightness>(
-          valueListenable: appBrightnessNotifier,
-          builder: (context, brightness, child) {
-            final isDarkMode = brightness == Brightness.dark;
-            final hiddenDetail = _hiddenTextDetails[textIndex];
-            final friendIds = List<String>.from(hiddenDetail['friendIds']);
-            final hiddenText = hiddenDetail['text'];
-
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final isDarkMode = appBrightnessNotifier.value == Brightness.dark;
             return AlertDialog(
               backgroundColor: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
               title: Row(
                 children: [
-                  Icon(
-                    Icons.visibility_off,
-                    color: Colors.orange,
-                    size: 20,
-                  ),
+                  const Icon(Icons.visibility_off, color: Colors.orange, size: 20),
                   const SizedBox(width: 8),
                   Text(
-                    'Texte masqué',
+                    'Gérer le masquage',
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
@@ -1259,11 +1539,11 @@ class _JourneePageState extends State<JourneePage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
                         color: Colors.yellow.withOpacity(0.2),
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.yellow.withOpacity(0.4)),
+                        border: Border.all(color: Colors.yellow.withOpacity(0.5)),
                       ),
                       child: Text(
                         '"$hiddenText"',
@@ -1275,36 +1555,46 @@ class _JourneePageState extends State<JourneePage> {
                     ),
                     const SizedBox(height: 16),
                     Text(
-                      'Visible uniquement pour :',
+                      'Cacher ce texte à :',
                       style: TextStyle(
-                        fontWeight: FontWeight.w500,
+                        fontWeight: FontWeight.w600,
                         color: isDarkMode ? Colors.white : Colors.black,
                       ),
                     ),
                     const SizedBox(height: 8),
-                    ...friendIds.map((friendId) {
-                      final friend = _allFriends.firstWhere(
-                            (f) => f['id'] == friendId,
-                        orElse: () => {'username': 'Ami inconnu'},
-                      );
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 4),
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.person,
-                              size: 16,
-                              color: Colors.blue,
+                    if (friends.isEmpty)
+                      Text(
+                        'Aucun ami trouvé.',
+                        style: TextStyle(color: isDarkMode ? Colors.white70 : Colors.grey.shade600),
+                      )
+                    else
+                      ...friends.map((friend) {
+                        final friendId = friend['id'] as String? ?? '';
+                        return CheckboxListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(
+                            friend['username'] ?? 'Sans nom',
+                            style: TextStyle(
+                              color: isDarkMode ? Colors.white : Colors.black,
+                              fontSize: 14,
                             ),
-                            const SizedBox(width: 8),
-                            Text(
-                              friend['username'],
-                              style: TextStyle(color: isDarkMode ? Colors.white70 : Colors.grey.shade700),
-                            ),
-                          ],
-                        ),
-                      );
-                    }).toList(),
+                          ),
+                          value: tempFriendIds.contains(friendId),
+                          activeColor: Colors.blue,
+                          onChanged: (bool? value) {
+                            setDialogState(() {
+                              if (value == true) {
+                                if (!tempFriendIds.contains(friendId)) {
+                                  tempFriendIds.add(friendId);
+                                }
+                              } else {
+                                tempFriendIds.remove(friendId);
+                              }
+                            });
+                          },
+                        );
+                      }).toList(),
                   ],
                 ),
               ),
@@ -1319,8 +1609,35 @@ class _JourneePageState extends State<JourneePage> {
                   },
                 ),
                 TextButton(
-                  child: const Text('Fermer', style: TextStyle(color: Colors.blue)),
+                  child: Text('Annuler', style: TextStyle(color: isDarkMode ? Colors.white70 : Colors.grey)),
                   onPressed: () => Navigator.of(context).pop(),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+                  child: const Text('Confirmer', style: TextStyle(color: Colors.white)),
+                  onPressed: () {
+                    if (tempFriendIds.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Sélectionnez au moins un ami')),
+                      );
+                      return;
+                    }
+                    setState(() {
+                      _hiddenTextDetails[textIndex] = {
+                        'friendIds': List<String>.from(tempFriendIds),
+                        'text': hiddenText,
+                      };
+                      // Recalculer _selectedFriendIds
+                      _selectedFriendIds.clear();
+                      for (var detail in _hiddenTextDetails) {
+                        for (final id in List<String>.from(detail['friendIds'] as List? ?? [])) {
+                          if (!_selectedFriendIds.contains(id)) _selectedFriendIds.add(id);
+                        }
+                      }
+                      _hasHiddenText = _hiddenTextDetails.isNotEmpty;
+                    });
+                    Navigator.of(context).pop();
+                  },
                 ),
               ],
             );
@@ -1330,13 +1647,11 @@ class _JourneePageState extends State<JourneePage> {
     );
   }
 
-  // 4. Modifier _removeHiddenText pour retirer le surlignage :
   void _removeHiddenText(int index) {
     setState(() {
       final removedDetail = _hiddenTextDetails.removeAt(index);
       _hasHiddenText = _hiddenTextDetails.isNotEmpty;
 
-      // Recalculer la liste globale des amis masqués
       _selectedFriendIds.clear();
       for (var detail in _hiddenTextDetails) {
         List<String> friendIds = List<String>.from(detail['friendIds']);
@@ -1347,17 +1662,14 @@ class _JourneePageState extends State<JourneePage> {
         }
       }
 
-      // Retirer le surlignage du texte dans l'éditeur
       final documentText = _controller.document.toPlainText();
       final targetText = removedDetail['text'] as String;
 
-      // Chercher toutes les occurrences et les dé-surligner
       int startIndex = 0;
       while (true) {
         startIndex = documentText.indexOf(targetText, startIndex);
         if (startIndex == -1) break;
 
-        // Retirer le surlignage en utilisant background avec null
         _controller.formatText(
           startIndex,
           targetText.length,
@@ -1368,8 +1680,6 @@ class _JourneePageState extends State<JourneePage> {
       }
     });
   }
-
-  // --- AUTRES MÉTHODES (logique existante) ---
 
   Future<List<Map<String, dynamic>>> _getFriendsList() async {
     auth.User? currentUser = auth.FirebaseAuth.instance.currentUser;
@@ -1406,52 +1716,41 @@ class _JourneePageState extends State<JourneePage> {
     }
   }
 
-// MODIFICATION ICI: La logique qui effaçait la note manuelle en tapant du texte a été supprimée.
   void _handleControllerChanges() {
-    final currentSelection = _controller.selection;
-    final doc = _controller.document;
-    final plainText = doc.toPlainText();
+    final bool isQuillActive = _focusNode.hasFocus;
 
-    // --- 1. GESTION DU CLIC SUR TEXTE MASQUÉ ---
+    // Si le QuillEditor n'est pas actif, on cache les suggestions
+    if (!isQuillActive) {
+      _removeOverlay();
+      return;
+    }
+
+    final String plainText = _controller.document.toPlainText();
+    final TextSelection selection = _controller.selection;
+
+    // Logique de clic sur du texte masqué
     if (_previousSelection != null &&
-        plainText.length == doc.toPlainText().length && // Le texte n'a pas changé
-        currentSelection != _previousSelection &&      // La sélection a changé
-        currentSelection.isCollapsed) {                // C'est un clic (curseur)
-
+        plainText.length == _controller.document.toPlainText().length &&
+        selection != _previousSelection &&
+        selection.isCollapsed) {
       final style = _controller.getSelectionStyle();
       if (style.containsKey('background') && style.attributes['background']!.value == '#FFFF00') {
-        final offset = currentSelection.baseOffset;
-        int foundIndex = -1;
-        int currentPos = 0;
-
-        for (int i = 0; i < _hiddenTextDetails.length; i++) {
-          final detail = _hiddenTextDetails[i];
-          final textToFind = detail['text'] as String;
-
-          int startIndex = plainText.indexOf(textToFind, currentPos);
-          if (startIndex != -1) {
-            final endIndex = startIndex + textToFind.length;
-            if (offset >= startIndex && offset < endIndex) {
-              foundIndex = i;
-              break;
-            }
-            currentPos = endIndex;
-          }
-        }
-
-        if (foundIndex != -1) {
-          Future.microtask(() {
-            _focusNode.unfocus();
-            _toggleHiddenTextVisibility(foundIndex);
-          });
+        // Find which hidden text detail matches the selected range
+        final int? index = _hiddenTextDetails.indexWhere((detail) {
+          final String targetText = detail['text'];
+          final int textStart = plainText.indexOf(targetText, selection.baseOffset - targetText.length);
+          return textStart != -1 && selection.baseOffset >= textStart && selection.baseOffset <= textStart + targetText.length;
+        });
+        if (index != -1 && index != null) {
+          _toggleHiddenTextVisibility(index);
         }
       }
     }
+    _previousSelection = selection;
 
-
-    // --- 2. GESTION DES MENTIONS ---
-    if (currentSelection.baseOffset > 0) {
-      final textBeforeCursor = plainText.substring(0, currentSelection.baseOffset);
+    // Logique de détection des mentions (uniquement pour l'éditeur Quill)
+    if (selection.baseOffset > 0) {
+      final textBeforeCursor = plainText.substring(0, selection.baseOffset);
       final lastAtIndex = textBeforeCursor.lastIndexOf('@');
 
       if (lastAtIndex != -1) {
@@ -1461,14 +1760,11 @@ class _JourneePageState extends State<JourneePage> {
           setState(() {
             _filteredFriends = _allFriends
                 .where((friend) =>
-            (friend['username']?.toLowerCase() ?? '')
-                .contains(_currentMentionQuery.toLowerCase()) ||
-                (friend['name']?.toLowerCase() ?? '')
-                    .contains(_currentMentionQuery.toLowerCase()))
+            (friend['username']?.toLowerCase() ?? '').contains(_currentMentionQuery.toLowerCase()) ||
+                (friend['name']?.toLowerCase() ?? '').contains(_currentMentionQuery.toLowerCase()))
                 .toList();
-            _showMentionSuggestions = true;
           });
-          _showOverlay();
+          _showOverlay(); // Affiche l'overlay pour l'éditeur Quill
         } else {
           _removeOverlay();
         }
@@ -1479,31 +1775,21 @@ class _JourneePageState extends State<JourneePage> {
       _removeOverlay();
     }
 
-    // --- 3. GESTION DE L'UI ---
+    // Mise à jour de l'UI (si le texte principal est vide, les notes IA sont réinitialisées)
     final trimmedText = plainText.trim();
     if (mounted) {
       setState(() {
-        // Active/désactive le champ commentaire si l'éditeur est vide
-        _isCommentEnabled = trimmedText.isEmpty;
-
-        // Si le texte est vide, et qu'aucune note manuelle n'est active, on réinitialise tout
+        // _isCommentEnabled est retiré, donc pas de logique ici
         if (trimmedText.isEmpty && !_manualNoteSelected) {
           _note = null;
           _isEditingManualNote = false;
           _manualProgress = 50.0;
         }
-
-        // CORRECTION IMPORTANTE : Suppression de la logique qui désélectionnait
-        // l'emoji/note manuelle quand l'utilisateur tapait du texte.
-        // Cela permet au texte et à la note manuelle de coexister.
-
         _postAsSouvenir = false;
       });
     }
-
-    // --- 4. MISE À JOUR DE LA SÉLECTION PRÉCÉDENTE ---
-    _previousSelection = currentSelection;
   }
+
   void _insertMentionInQuill(String friendName, String friendId) {
     final text = _controller.document.toPlainText();
     final selection = _controller.selection;
@@ -1527,7 +1813,6 @@ class _JourneePageState extends State<JourneePage> {
     }
     _removeOverlay();
   }
-
 
   void _showFriendSelectionDialog({Map<String, dynamic>? existingDetail, int? indexToEdit}) async {
     final selection = _controller.selection;
@@ -1579,12 +1864,12 @@ class _JourneePageState extends State<JourneePage> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      'Texte à masquer: "$selectedText"',
+                      'Texte masqué : "$selectedText"',
                       style: TextStyle(color: isDarkMode ? Colors.white : Colors.black),
                     ),
                     const SizedBox(height: 16),
                     Text(
-                      'Sélectionnez qui peut voir ce texte:',
+                      'Cacher ce texte à :',
                       style: TextStyle(
                         fontWeight: FontWeight.w500,
                         color: isDarkMode ? Colors.white : Colors.black,
@@ -1642,21 +1927,24 @@ class _JourneePageState extends State<JourneePage> {
                       return;
                     }
 
-                    // Modifier la méthode de formatage pour utiliser un surlignage au lieu du rouge :
                     _controller.formatSelection(
-                        quill.Attribute.fromKeyValue('background', '#FFFF00') // Surlignage jaune
+                        quill.Attribute.fromKeyValue('background', '#FFFF00')
+                    );
+                    // Texte noir sur fond jaune pour être lisible
+                    _controller.formatSelection(
+                        quill.Attribute.fromKeyValue('color', '#000000')
                     );
 
                     setState(() {
                       if (indexToEdit != null) {
                         _hiddenTextDetails[indexToEdit] = {
                           'friendIds': List<String>.from(tempSelectedFriendIds),
-                          'text': selectedText
+                          'text': selectedText.trim()
                         };
                       } else {
                         _hiddenTextDetails.add({
                           'friendIds': List<String>.from(tempSelectedFriendIds),
-                          'text': selectedText
+                          'text': selectedText.trim()
                         });
                       }
 
@@ -1675,7 +1963,7 @@ class _JourneePageState extends State<JourneePage> {
                     Navigator.of(context).pop();
                   },
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue, // Couleur du bouton
+                    backgroundColor: Colors.blue,
                   ),
                 ),
               ],
@@ -1686,16 +1974,15 @@ class _JourneePageState extends State<JourneePage> {
     );
   }
 
-  void _showOverlay() {
-    if (_overlayEntry != null) {
-      _removeOverlay();
-    }
-
+  void _showOverlay({bool isForCommentField = false}) { // isForCommentField n'est plus utilisé
+    if (_overlayEntry != null) _removeOverlay();
     if (_filteredFriends.isEmpty) return;
 
     OverlayState? overlayState = Overlay.of(context);
+
     final RenderBox? editorRenderBox = _focusNode.context?.findRenderObject() as RenderBox?;
     if (editorRenderBox == null) return;
+
     final Offset editorOffset = editorRenderBox.localToGlobal(Offset.zero);
 
     _overlayEntry = OverlayEntry(
@@ -1703,7 +1990,6 @@ class _JourneePageState extends State<JourneePage> {
         valueListenable: appBrightnessNotifier,
         builder: (context, brightness, child) {
           final isDarkMode = brightness == Brightness.dark;
-
           return Positioned(
             top: editorOffset.dy + editorRenderBox.size.height + 8,
             left: editorOffset.dx + 16,
@@ -1723,21 +2009,10 @@ class _JourneePageState extends State<JourneePage> {
                     return ListTile(
                       leading: CircleAvatar(
                         backgroundColor: Colors.blue,
-                        child: Text(
-                          (friend['username']?.substring(0, 1) ?? 'U').toUpperCase(),
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                        ),
+                        child: Text((friend['username']?.substring(0, 1) ?? 'U').toUpperCase(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                       ),
-                      title: Text(
-                        friend['username'] ?? 'Inconnu',
-                        style: TextStyle(color: isDarkMode ? Colors.white : Colors.black),
-                      ),
-                      subtitle: friend['name']?.isNotEmpty == true
-                          ? Text(
-                        friend['name'],
-                        style: TextStyle(color: isDarkMode ? Colors.white70 : Colors.grey.shade700),
-                      )
-                          : null,
+                      title: Text(friend['username'] ?? 'Inconnu', style: TextStyle(color: isDarkMode ? Colors.white : Colors.black)),
+                      subtitle: friend['name']?.isNotEmpty == true ? Text(friend['name'], style: TextStyle(color: isDarkMode ? Colors.white70 : Colors.grey.shade700)) : null,
                       onTap: () => _insertMentionInQuill(friend['username'] ?? 'Inconnu', friend['id']),
                     );
                   },
@@ -1748,7 +2023,6 @@ class _JourneePageState extends State<JourneePage> {
         },
       ),
     );
-
     overlayState.insert(_overlayEntry!);
   }
 
@@ -1757,27 +2031,24 @@ class _JourneePageState extends State<JourneePage> {
     _overlayEntry = null;
   }
 
-  // OBTENIR NOTE (MODIFIÉE pour prendre le texte en paramètre et retourner un booléen pour le succès)
   Future<bool> _obtenirNote(String currentText) async {
-
     SharedPreferences prefs = await SharedPreferences.getInstance();
     String iaPreference = prefs.getString('iaPreference') ?? 'ressenti';
     String prompt = iaPreference == 'ressenti'
         ? 'Analyse ce texte et donne une note sur 100 basée sur le ressenti. Réponds uniquement avec un nombre entier suivi de "/100". Texte : $currentText'
         : 'Analyse ce texte et donne une note sur 100 basée sur la qualité de la journée. Réponds uniquement avec un nombre entier suivi de "/100". Texte : $currentText';
 
-    const url = 'https://api.deepseek.com/v1/chat/completions';
+    const url = 'https://api.deepinfra.com/v1/openai/chat/completions';
     try {
       final response = await http.post(Uri.parse(url),
           headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $DEEPSEEK_API_KEY'},
           body: jsonEncode({
-            'model': 'deepseek-chat',
+            'model': await resolveAiModel(),
             'messages': [{'role': 'user', 'content': prompt}],
             'max_tokens': 50
           }));
 
       if (response.statusCode == 200) {
-        // CORRIGÉ : Forcer le décodage en UTF-8 pour éviter les problèmes de caractères
         final data = jsonDecode(utf8.decode(response.bodyBytes));
         final noteText = data['choices'][0]['message']['content']?.toString() ?? '';
         final standardMatch = RegExp(r'(\d+)/100').firstMatch(noteText);
@@ -1789,11 +2060,11 @@ class _JourneePageState extends State<JourneePage> {
         if (parsedNote != null) {
           setState(() {
             _note = parsedNote.clamp(0, 100);
-            _manualNoteSelected = false; // La note IA désactive la note manuelle explicite
-            _isEditingManualNote = false; // Cache le slider manuel
+            _manualNoteSelected = false;
+            _isEditingManualNote = false;
           });
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Note IA obtenue : $_note/100'), backgroundColor: Colors.green));
-          return true; // Succès
+          return true;
         } else {
           throw Exception("Format de note non reconnu par l'IA");
         }
@@ -1804,15 +2075,19 @@ class _JourneePageState extends State<JourneePage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erreur d\'obtention de la note: $e'), backgroundColor: Colors.red));
       }
-      return false; // Échec
+      return false;
     }
   }
 
   Future<String?> _getUsernameById(String userId) async {
     try {
       DocumentSnapshot userDoc = await FirebaseFirestore.instance.collection('users').doc(userId).get();
-      return userDoc['username'];
+      if (userDoc.exists) {
+        return (userDoc.data() as Map<String, dynamic>)['username'];
+      }
+      return null;
     } catch (e) {
+      print("Erreur de récupération de l'username : $e");
       return null;
     }
   }

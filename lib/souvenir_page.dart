@@ -1,4 +1,4 @@
-// souvenir_page.dart
+﻿// souvenir_page.dart
 
 import 'dart:io';
 import 'dart:typed_data'; // Pour les images web
@@ -15,6 +15,7 @@ import 'souvenir_model.dart';
 import 'package:http/http.dart' as http; // AJOUTÉ : Importation nécessaire pour les appels API
 import 'dart:convert'; // AJOUTÉ : Importation nécessaire pour encoder/décoder le JSON
 import 'home_page.dart' show getUserSubscriptionData, showVipPromotionPopup;
+import 'ai_model_selector.dart';
 
 // Importez votre HomeBarrePage si vous y naviguez après la sauvegarde
 import 'main.dart'; // Assurez-vous que cette importation est correcte
@@ -24,7 +25,7 @@ final ValueNotifier<Brightness> appBrightnessNotifier = ValueNotifier<Brightness
 
 // AJOUTÉ : Clé API nécessaire pour l'analyse des éléments intéressants.
 // (À NE PAS LAISSER EN DUR EN PRODUCTION !)
-const String DEEPSEEK_API_KEY = 'sk-2891f44dd4e344908dda525bf5852649';
+const String DEEPSEEK_API_KEY = 'HA2RvSG1u7aE7u78yXd1UqnBuMY6VV70';
 
 
 class SouvenirPage extends StatefulWidget {
@@ -58,6 +59,7 @@ class _SouvenirPageState extends State<SouvenirPage> {
   // NOUVEAU: Pour la republication
   final bool _isRepublishing;
   final SouvenirModel? _originalSouvenirToRepublish;
+  String? _selectedCardColor; // Couleur locale de la carte (null = suivre le global)
 
   // NOUVEAU: Pour la mention d'amis
   List<Map<String, dynamic>> _allFriends = [];
@@ -65,6 +67,49 @@ class _SouvenirPageState extends State<SouvenirPage> {
   OverlayEntry? _overlayEntry;
   String _currentMentionQuery = '';
 
+
+  // METHODE DE SELECTION DE COULEUR
+  void _showColorPickerDialog() {
+    final colors = {
+      'bleu': Colors.blue, 'vert': Colors.green, 'rouge': Colors.red,
+      'orange': Colors.orange, 'jaune': Colors.yellow, 'violet': Colors.purple, 'rose': Colors.pink, 'blanc': Colors.grey.shade300
+    };
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Couleur de cette publication'),
+        content: Wrap(
+          spacing: 12, runSpacing: 12,
+          children: colors.keys.map((String key) {
+            return GestureDetector(
+              onTap: () {
+                setState(() => _selectedCardColor = key);
+                Navigator.pop(context);
+              },
+              child: Container(
+                width: 40, height: 40,
+                decoration: BoxDecoration(
+                  color: colors[key],
+                  shape: BoxShape.circle,
+                  border: Border.all(color: _selectedCardColor == key ? Colors.black : Colors.transparent, width: 3),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              setState(() => _selectedCardColor = null);
+              Navigator.pop(context);
+            },
+            child: const Text("Suivre le paramètre global"),
+          )
+        ],
+      ),
+    );
+  }
   _SouvenirPageState({SouvenirModel? originalSouvenirToRepublish})
       : _isRepublishing = originalSouvenirToRepublish != null,
         _originalSouvenirToRepublish = originalSouvenirToRepublish;
@@ -81,7 +126,28 @@ class _SouvenirPageState extends State<SouvenirPage> {
       _loadSouvenirForEditing();
     } else if (_isRepublishing) {
       _loadSouvenirForRepublishing();
+    } else {
+      // On charge l'état par défaut ici
+      _loadDefaultPublicState();
     }
+  }
+
+  // --- NOUVELLES METHODES DE SAUVEGARDE ---
+  Future<void> _loadDefaultPublicState() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        _isPublic = prefs.getBool('defaultVisibilityPublic') ?? false;
+      });
+    }
+  }
+
+  void _togglePublicState(bool value) async {
+    setState(() {
+      _isPublic = value;
+    });
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('defaultVisibilityPublic', value);
   }
 
   Future<void> _checkVipAndAnalysisStatus() async {
@@ -223,6 +289,7 @@ class _SouvenirPageState extends State<SouvenirPage> {
       _selectedQualite = souvenir.qualite;
       _noteQualite = souvenir.noteQualite.toDouble();
       _displayImages.addAll(souvenir.photoUrls);
+      _selectedCardColor = souvenir.cardColor;
     });
   }
 
@@ -235,6 +302,7 @@ class _SouvenirPageState extends State<SouvenirPage> {
       _selectedQualite = originalSouvenir.qualite;
       _noteQualite = originalSouvenir.noteQualite.toDouble();
       _displayImages.addAll(originalSouvenir.photoUrls);
+      _selectedCardColor = originalSouvenir.cardColor;
     });
   }
 
@@ -438,6 +506,7 @@ class _SouvenirPageState extends State<SouvenirPage> {
         'estPublic': _isPublic,
         'qualite': _selectedQualite.name,
         'noteQualite': _noteQualite.toInt(),
+        'cardColor': _selectedCardColor,
         'qualiteDeVieActuelle': nouvelleQualiteDeVie,
         'photoUrls': uploadedImageUrls,
         'isRepost': _isRepublishing,
@@ -445,10 +514,13 @@ class _SouvenirPageState extends State<SouvenirPage> {
         'repostedFromUserName': _isRepublishing ? await _getUsernameById(_originalSouvenirToRepublish!.userId!) : null,
       };
 
+      String souvenirId;
       if (widget.souvenirToEdit != null) {
-        await FirebaseFirestore.instance.collection('souvenirs').doc(widget.souvenirToEdit!.id).update(souvenirData);
+        souvenirId = widget.souvenirToEdit!.id!;
+        await FirebaseFirestore.instance.collection('souvenirs').doc(souvenirId).update(souvenirData);
       } else {
-        await FirebaseFirestore.instance.collection('souvenirs').add(souvenirData);
+        final docRef = await FirebaseFirestore.instance.collection('souvenirs').add(souvenirData);
+        souvenirId = docRef.id;
       }
 
       // --- VIP --- : L'analyse des éléments intéressants est maintenant conditionnelle
@@ -488,6 +560,11 @@ class _SouvenirPageState extends State<SouvenirPage> {
       }
 
       await FirebaseFirestore.instance.collection('users').doc(currentUser.uid).update({'qualiteDeVieActuelle': nouvelleQualiteDeVie});
+
+      // Classify excerpts into biographical themes (fire-and-forget)
+      if (_souvenirController.text.isNotEmpty) {
+        _classifierExtraitsParThemes(_souvenirController.text, souvenirId, _selectedDate);
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Souvenir sauvegardé !'), backgroundColor: Colors.green));
@@ -558,7 +635,7 @@ class _SouvenirPageState extends State<SouvenirPage> {
 
     print('Début de l\'analyse du souvenir pour catégorisation...');
 
-    const url = 'https://api.deepseek.com/v1/chat/completions';
+    const url = 'https://api.deepinfra.com/v1/openai/chat/completions';
     try {
       final response = await http.post(
         Uri.parse(url),
@@ -567,7 +644,7 @@ class _SouvenirPageState extends State<SouvenirPage> {
           'Authorization': 'Bearer $DEEPSEEK_API_KEY',
         },
         body: jsonEncode({
-          'model': 'deepseek-chat',
+          'model': await resolveAiModel(),
           'messages': [
             {
               'role': 'user',
@@ -600,9 +677,15 @@ class _SouvenirPageState extends State<SouvenirPage> {
         Map<String, dynamic>? parsedElements;
         try {
           parsedElements = jsonDecode(elementsText);
-        } catch (e) {
-          print("Erreur de parsing JSON pour les éléments intéressants: $e");
-          return;
+        } catch (_) {
+          try {
+            final sanitized = elementsText.replaceAllMapped(
+                RegExp(r'[\x00-\x1F]'), (m) => ' ');
+            parsedElements = jsonDecode(sanitized);
+          } catch (e) {
+            print("Erreur de parsing JSON pour les éléments intéressants: $e");
+            return;
+          }
         }
 
         if (parsedElements != null && parsedElements.containsKey('elements')) {
@@ -671,6 +754,133 @@ class _SouvenirPageState extends State<SouvenirPage> {
     }
   }
 
+  /// Classifie des extraits du souvenir dans des thèmes/sous-thèmes biographiques sur Firebase.
+  Future<void> _classifierExtraitsParThemes(String texte, String souvenirId, DateTime dateEvent) async {
+    fbAuth.User? currentUser = fbAuth.FirebaseAuth.instance.currentUser;
+    if (currentUser == null || texte.isEmpty) return;
+    debugPrint('[THEME_CLASSIFY] ── Début classification souvenir $souvenirId (${texte.length} chars) ──');
+    const url = 'https://api.deepinfra.com/v1/openai/chat/completions';
+    try {
+      final response = await http.post(
+        Uri.parse(url),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $DEEPSEEK_API_KEY',
+        },
+        body: jsonEncode({
+          'model': await resolveAiModel(),
+          'messages': [
+            {
+              'role': 'user',
+              'content': '''Analyse ce texte de journal intime et extrait des passages spécifiques et significatifs. Pour chaque passage, attribue :
+- un thème principal en UN mot (ex: famille, travail, amour, santé, amis, loisirs, voyage, école, argent, spiritualité)
+- un sous-thème très précis et descriptif en 2-5 mots (ex: "relation difficile avec la mère", "nouveau travail et bonheur", "dispute amicale douloureuse", "malheur maternel", "réussite scolaire"). N\'hésite pas à créer de nombreux sous-thèmes différents et précis.
+
+Réponds STRICTEMENT au format JSON suivant, sans aucun texte supplémentaire :
+{
+  "extraits": [
+    {
+      "theme": "famille",
+      "sous_theme": "relation difficile avec la mère",
+      "extrait": "passage exact tiré du texte"
+    }
+  ]
+}
+
+Texte à analyser : $texte'''
+            }
+          ],
+          'max_tokens': 1200,
+        }),
+      );
+      debugPrint('[THEME_CLASSIFY] Réponse API: status=${response.statusCode}');
+      if (response.statusCode != 200) {
+        debugPrint('[THEME_CLASSIFY] ERREUR API souvenir: ${response.body}');
+        return;
+      }
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      String raw = (data['choices']?[0]['message']['content'] as String? ?? '').trim();
+      debugPrint('[THEME_CLASSIFY] Réponse brute IA: ${raw.length > 200 ? raw.substring(0, 200) : raw}');
+      raw = raw.replaceAll(RegExp(r'^```json\s*|\s*```$'), '');
+      final jsonMatch = RegExp(r'\{.*\}', dotAll: true).firstMatch(raw);
+      if (jsonMatch == null) {
+        debugPrint('[THEME_CLASSIFY] Impossible de trouver le JSON dans la réponse');
+        return;
+      }
+      Map<String, dynamic>? parsed;
+      try {
+        parsed = jsonDecode(jsonMatch.group(0)!);
+      } catch (_) {
+        try {
+          final sanitized = jsonMatch.group(0)!.replaceAllMapped(
+              RegExp(r'[\x00-\x1F]'), (m) => ' ');
+          parsed = jsonDecode(sanitized);
+        } catch (e) {
+          debugPrint('[THEME_CLASSIFY] Erreur parsing JSON: $e');
+          return;
+        }
+      }
+      final extraits = parsed?['extraits'] as List?;
+      if (extraits == null || extraits.isEmpty) {
+        debugPrint('[THEME_CLASSIFY] Aucun extrait retourné par l\'IA');
+        return;
+      }
+      debugPrint('[THEME_CLASSIFY] ${extraits.length} extraits à enregistrer');
+
+      final db = FirebaseFirestore.instance;
+      int saved = 0;
+      for (final extrait in extraits) {
+        final theme = (extrait['theme'] as String? ?? '').trim();
+        final sousTheme = (extrait['sous_theme'] as String? ?? '').trim();
+        final texteExtrait = (extrait['extrait'] as String? ?? '').trim();
+        if (theme.isEmpty || sousTheme.isEmpty || texteExtrait.isEmpty) continue;
+        final themeId = normaliserId(theme);
+        final sousThemeId = normaliserId(sousTheme);
+        debugPrint('[THEME_CLASSIFY] → thème="$theme" ($themeId) | sous-thème="$sousTheme" ($sousThemeId)');
+        final themeRef = db
+            .collection('users')
+            .doc(currentUser.uid)
+            .collection('themes_biographiques')
+            .doc(themeId);
+        await themeRef.set({'nom': theme, 'createdAt': Timestamp.now()}, SetOptions(merge: true));
+        final sousThemeRef = themeRef.collection('sous_themes').doc(sousThemeId);
+        await sousThemeRef.set(
+            {'nom': sousTheme, 'updatedAt': Timestamp.now()}, SetOptions(merge: true));
+
+        final startOfDay = DateTime(dateEvent.year, dateEvent.month, dateEvent.day);
+        final endOfDay = startOfDay.add(const Duration(days: 1));
+
+        final existingSnap = await sousThemeRef.collection('extraits')
+            .where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
+            .where('date', isLessThan: Timestamp.fromDate(endOfDay))
+            .limit(1)
+            .get();
+
+        if (existingSnap.docs.isNotEmpty) {
+          final doc = existingSnap.docs.first;
+          final existingTexte = doc.get('texte') as String? ?? '';
+          final mergedTexte = existingTexte + '\n' + texteExtrait;
+          await doc.reference.update({
+             'texte': mergedTexte,
+             'lastAnalyzedAutobiographie': FieldValue.delete(), // Mettre à null pour repasser en IA si besoin
+             'souvenirId': souvenirId,
+             'sourceType': 'journee_et_souvenir', // Indique fusion
+          });
+        } else {
+          await sousThemeRef.collection('extraits').add({
+            'texte': texteExtrait,
+            'souvenirId': souvenirId,
+            'sourceType': 'souvenir',
+            'date': Timestamp.fromDate(dateEvent),
+          });
+        }
+        saved++;
+      }
+      debugPrint('[THEME_CLASSIFY] ✓ $saved extraits enregistrés dans themes_biographiques (souvenir)');
+    } catch (e) {
+      debugPrint('[THEME_CLASSIFY] EXCEPTION souvenir: $e');
+    }
+  }
 
   String _getQualiteLabel(SouvenirQualite qualite) {
     switch (qualite) {
@@ -772,7 +982,11 @@ class _SouvenirPageState extends State<SouvenirPage> {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 24.0),
+                    const SizedBox(height: 16.0), // Réduit l'espacement
+
+                    // ---> AJOUT DE LA BARRE D'OUTILS ICI <---
+                    _buildActionToolbar(isDarkMode),
+                    const SizedBox(height: 16.0),
 
                     _buildPhotoSection(isDarkMode),
                     const SizedBox(height: 24.0),
@@ -782,83 +996,85 @@ class _SouvenirPageState extends State<SouvenirPage> {
                       color: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8.0),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                         child: Column(
                           children: [
-                            ListTile(
-                              leading: Icon(Icons.calendar_today, color: isDarkMode ? Colors.white70 : Colors.grey.shade700),
-                              title: const Text("Date du souvenir"),
-                              trailing: Text(
-                                DateFormat('dd MMMM yyyy', 'fr_FR').format(_selectedDate),
-                                style: TextStyle(fontWeight: FontWeight.bold, color: theme.colorScheme.primary),
-                              ),
+                            // Date row
+                            InkWell(
                               onTap: () => _selectDate(context),
-                            ),
-                            const Divider(indent: 16, endIndent: 16),
-                            ListTile(
-                              leading: Icon(Icons.sentiment_very_satisfied, color: isDarkMode ? Colors.white70 : Colors.grey.shade700),
-                              title: const Text("Qualité du souvenir"),
-                              trailing: DropdownButton<SouvenirQualite>(
-                                value: _selectedQualite,
-                                underline: const SizedBox(),
-                                dropdownColor: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
-                                onChanged: (SouvenirQualite? newValue) {
-                                  if (newValue != null) {
-                                    setState(() => _selectedQualite = newValue);
-                                  }
-                                },
-                                items: SouvenirQualite.values.map((qualite) {
-                                  return DropdownMenuItem<SouvenirQualite>(
-                                    value: qualite,
-                                    child: Text(_getQualiteLabel(qualite)),
-                                  );
-                                }).toList(),
-                              ),
-                            ),
-                            const Divider(indent: 16, endIndent: 16),
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                               child: Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
-                                  const Text("Intensité du souvenir"),
+                                  Icon(Icons.calendar_today, size: 18, color: isDarkMode ? Colors.white70 : Colors.grey.shade700),
+                                  const SizedBox(width: 10),
+                                  const Text('Date', style: TextStyle(fontSize: 13)),
+                                  const Spacer(),
                                   Text(
-                                    '${_noteQualite.toInt()}/100',
-                                    style: TextStyle(fontWeight: FontWeight.bold, color: theme.colorScheme.primary),
+                                    DateFormat('dd MMM yyyy', 'fr_FR').format(_selectedDate),
+                                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: theme.colorScheme.primary),
                                   ),
+                                  const SizedBox(width: 4),
+                                  Icon(Icons.edit, size: 14, color: theme.colorScheme.primary),
                                 ],
                               ),
                             ),
-                            Slider(
-                              value: _noteQualite,
-                              min: 0,
-                              max: 100,
-                              divisions: 100,
-                              label: _noteQualite.round().toString(),
-                              onChanged: (double value) {
-                                setState(() => _noteQualite = value);
-                              },
+                            const Divider(height: 14),
+                            // Quality + intensity row
+                            Row(
+                              children: [
+                                Icon(Icons.star, size: 18, color: isDarkMode ? Colors.white70 : Colors.grey.shade700),
+                                const SizedBox(width: 10),
+                                const Text('Qualité', style: TextStyle(fontSize: 13)),
+                                const Spacer(),
+                                DropdownButton<SouvenirQualite>(
+                                  value: _selectedQualite,
+                                  underline: const SizedBox(),
+                                  isDense: true,
+                                  style: TextStyle(fontSize: 13, color: isDarkMode ? Colors.white : Colors.black87),
+                                  dropdownColor: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+                                  onChanged: (SouvenirQualite? newValue) {
+                                    if (newValue != null) setState(() => _selectedQualite = newValue);
+                                  },
+                                  items: SouvenirQualite.values.map((qualite) {
+                                    return DropdownMenuItem<SouvenirQualite>(
+                                      value: qualite,
+                                      child: Text(_getQualiteLabel(qualite)),
+                                    );
+                                  }).toList(),
+                                ),
+                              ],
                             ),
+                            const Divider(height: 14),
+                            // Intensity slider row
+                            Row(
+                              children: [
+                                Icon(Icons.tune, size: 18, color: isDarkMode ? Colors.white70 : Colors.grey.shade700),
+                                const SizedBox(width: 6),
+                                const Text('Intensité', style: TextStyle(fontSize: 13)),
+                                Expanded(
+                                  child: SliderTheme(
+                                    data: SliderTheme.of(context).copyWith(
+                                      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+                                      trackHeight: 3,
+                                      overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+                                    ),
+                                    child: Slider(
+                                      value: _noteQualite,
+                                      min: 0,
+                                      max: 100,
+                                      divisions: 100,
+                                      onChanged: (double value) => setState(() => _noteQualite = value),
+                                    ),
+                                  ),
+                                ),
+                                Text(
+                                  '${_noteQualite.toInt()}',
+                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: theme.colorScheme.primary),
+                                ),
+                              ],
+                            ),
+
                           ],
                         ),
-                      ),
-                    ),
-                    const SizedBox(height: 24.0),
-
-                    Card(
-                      elevation: 2,
-                      color: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      child: SwitchListTile(
-                        title: const Text("Rendre ce souvenir public"),
-                        secondary: Icon(
-                          _isPublic ? Icons.lock_open : Icons.lock,
-                          color: isDarkMode ? Colors.white70 : Colors.grey.shade700,
-                        ),
-                        value: _isPublic,
-                        onChanged: (bool value) {
-                          setState(() => _isPublic = value);
-                        },
                       ),
                     ),
                     const SizedBox(height: 32.0),
@@ -892,6 +1108,39 @@ class _SouvenirPageState extends State<SouvenirPage> {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildActionToolbar(bool isDarkMode) {
+    return Card(
+      elevation: 2,
+      color: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8.0),
+        child: Row(
+          children: [
+            IconButton(
+              onPressed: _isRepublishing ? null : _showColorPickerDialog,
+              icon: const Icon(Icons.palette_outlined),
+              color: _selectedCardColor != null 
+                  ? Colors.blue
+                  : (isDarkMode ? Colors.white70 : Colors.grey.shade700),
+              tooltip: 'Couleur de la publication',
+            ),
+            const Spacer(),
+            Text(
+              _isPublic ? 'Public' : 'Privé',
+              style: TextStyle(color: isDarkMode ? Colors.white : Colors.black),
+            ),
+            Switch(
+              value: _isPublic,
+              onChanged: _togglePublicState, // <-- NOUVELLE FONCTION ICI
+              activeColor: Colors.blue,
+            ),
+          ],
+        ),
+      ),
     );
   }
 

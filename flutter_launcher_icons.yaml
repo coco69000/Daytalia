@@ -1,0 +1,12 @@
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/logo1.png"   # ← Ton icône principale
+
+  # Options recommandées
+  adaptive_icon_background: "#EADBC8"    # Couleur de fond pour Android (Adaptive Icon)
+  adaptive_icon_foreground: "assets/images/logo1.png"
+
+  # Minimum sizes
+  min_sdk_android: 21
+  remove_alpha_ios: true

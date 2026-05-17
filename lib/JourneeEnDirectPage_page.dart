@@ -5,7 +5,7 @@ import 'package:flutter_quill/flutter_quill.dart' as quill;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'journee_model.dart';
-
+import 'package:shared_preferences/shared_preferences.dart';
 // AJOUTÉ : Imports nécessaires pour la gestion des images
 import 'dart:io';
 import 'dart:typed_data';
@@ -32,7 +32,7 @@ class _JourneeEnDirectPageState extends State<JourneeEnDirectPage> {
   bool _isLoading = false;
   late stt.SpeechToText _speech;
   bool _isListening = false;
-
+  String? _selectedCardColor; // null = Suit le paramètre global
   // AJOUTÉ : Variables d'état pour la gestion des images
   final ImagePicker _picker = ImagePicker();
   List<dynamic> _displayImages = []; // Peut contenir des XFile (nouvelles) ou des String (URLs existantes)
@@ -42,17 +42,82 @@ class _JourneeEnDirectPageState extends State<JourneeEnDirectPage> {
     super.initState();
     _speech = stt.SpeechToText();
     if (widget.journeeToEdit != null) {
+      String texte = widget.journeeToEdit!.texte1 ?? '';
+      if (!texte.endsWith('\n')) {
+        texte += '\n';
+      }
       _controller.document = quill.Document.fromJson([
-        {'insert': widget.journeeToEdit!.texte1 ?? ''}
+        {'insert': texte}
       ]);
-      // AJOUTÉ : Charger les images existantes si on édite une journée
       if (widget.journeeToEdit!.photoUrls.isNotEmpty) {
         setState(() {
           _displayImages.addAll(widget.journeeToEdit!.photoUrls);
         });
       }
+      _selectedCardColor = widget.journeeToEdit!.cardColor;
+      _estPublic = widget.journeeToEdit!.estPublic; // on récupère l'état existant pour l'édition
+    } else {
+      _loadDefaultPublicState(); // ou la config sauvegardée pour du neuf
     }
   }
+Future<void> _loadDefaultPublicState() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        _estPublic = prefs.getBool('defaultVisibilityPublic') ?? false;
+      });
+    }
+  }
+
+  void _togglePublicState(bool value) async {
+    setState(() {
+      _estPublic = value;
+    });
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('defaultVisibilityPublic', value);
+  }
+  // METHODE DE SELECTION DE COULEUR
+void _showColorPickerDialog() {
+  final colors = {
+    'bleu': Colors.blue, 'vert': Colors.green, 'rouge': Colors.red,
+    'orange': Colors.orange, 'jaune': Colors.yellow, 'violet': Colors.purple, 'rose': Colors.pink, 'blanc': Colors.grey.shade300
+  };
+
+  showDialog(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Couleur de cette publication'),
+      content: Wrap(
+        spacing: 12, runSpacing: 12,
+        children: colors.keys.map((String key) {
+          return GestureDetector(
+            onTap: () {
+              setState(() => _selectedCardColor = key);
+              Navigator.pop(context);
+            },
+            child: Container(
+              width: 40, height: 40,
+              decoration: BoxDecoration(
+                color: colors[key],
+                shape: BoxShape.circle,
+                border: Border.all(color: _selectedCardColor == key ? Colors.black : Colors.transparent, width: 3),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () {
+            setState(() => _selectedCardColor = null); // Reset au global
+            Navigator.pop(context);
+          },
+          child: const Text("Suivre le paramètre global"),
+        )
+      ],
+    ),
+  );
+}
 
   // AJOUTÉ : Logique pour sélectionner des images depuis la galerie
   Future<void> _pickImages() async {
@@ -182,13 +247,20 @@ class _JourneeEnDirectPageState extends State<JourneeEnDirectPage> {
       final journeeData = {
         'texte1': texte,
         'estPublic': _estPublic,
-        'date': Timestamp.fromDate(DateTime.now()),
+
+        // 👇 LA CORRECTION EST ICI 👇
+        'date': widget.journeeToEdit != null 
+            ? Timestamp.fromDate(widget.journeeToEdit!.date) 
+            : Timestamp.now(),
+        // 👆 FIN DE LA CORRECTION 👆
+
         'userId': currentUser.uid,
         'photoUrls': uploadedImageUrls, // AJOUTÉ : Sauvegarde des URLs dans Firestore
         // Les autres champs comme 'note', 'emoji' etc. sont nuls car c'est une "journée en direct"
         'note': null,
         'emoji': null,
         'commentaire': null,
+        'cardColor': _selectedCardColor,
       };
 
       if (widget.journeeToEdit != null) {
@@ -239,7 +311,7 @@ class _JourneeEnDirectPageState extends State<JourneeEnDirectPage> {
                 child: quill.QuillEditor.basic(
                   controller: _controller,
                   focusNode: _focusNode,
-                  configurations: quill.QuillEditorConfigurations(
+                  config: quill.QuillEditorConfig(
                       padding: const EdgeInsets.all(12),
                       placeholder: 'Écrivez votre journée ici...',
                       scrollable: true
@@ -268,6 +340,12 @@ class _JourneeEnDirectPageState extends State<JourneeEnDirectPage> {
                       color: _isListening ? Colors.red : Theme.of(context).iconTheme.color,
                       tooltip: 'Dictée vocale',
                     ),
+                    IconButton(
+                      onPressed: _showColorPickerDialog,
+                      icon: const Icon(Icons.palette),
+                      color: _selectedCardColor != null ? Colors.blueAccent : (Theme.of(context).brightness == Brightness.dark ? Colors.white70 : Colors.grey.shade700),
+                      tooltip: 'Couleur de la publication',
+                    ),
                   ],
                 ),
                 Row(
@@ -275,11 +353,8 @@ class _JourneeEnDirectPageState extends State<JourneeEnDirectPage> {
                     Text(_estPublic ? 'Public' : 'Privé'),
                     Switch(
                       value: _estPublic,
-                      onChanged: (value) {
-                        setState(() {
-                          _estPublic = value;
-                        });
-                      },
+                      onChanged: _togglePublicState,
+                      activeColor: Colors.blue,
                     ),
                   ],
                 ),

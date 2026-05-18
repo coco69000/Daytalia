@@ -5,11 +5,20 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'dart:io';
+import 'dart:ui'; // Requis pour ImageFilter.blur
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'home_page.dart';
 import 'memories_page.dart';
 import 'inscription_page.dart';
+import 'main.dart';
+import 'journee_model.dart';
+import 'souvenir_model.dart';
+import 'onboarding_tutorial_page.dart';
+
+// NOTE: Pense à importer tes pages d'édition si tu veux que les boutons "Modifier" marchent
+// import 'journee_page.dart';
+// import 'souvenir_page.dart';
 
 // Structures de données pour les options (utilisées dans la personnalisation)
 class _ColorOption {
@@ -43,10 +52,9 @@ class _ProfilePageState extends State<ProfilePage> {
   String _profileImageUrl = '';
   bool _isVip = false;
   int _likeCount = 0;
-  // --- NOUVEAU : Variables pour les amis ---
+  // Variables pour les amis
   int _friendCount = 0;
   List<String> _myFriends = [];
-  // --- FIN NOUVEAU ---
 
   // Définition du nombre d'emplacements d'épingles
   final int _totalPinSlots = 7;
@@ -60,7 +68,6 @@ class _ProfilePageState extends State<ProfilePage> {
   // Préférences
   Brightness _appBrightness = Brightness.light;
   String _iaPreference = 'ressenti';
-  bool _notificationsEnabled = true;
   String _selectedLanguage = 'Français';
   bool _profileCardBlurEnabled = false;
 
@@ -98,7 +105,6 @@ class _ProfilePageState extends State<ProfilePage> {
         _appBrightness =
             WidgetsBinding.instance.platformDispatcher.platformBrightness;
       }
-      _notificationsEnabled = prefs.getBool('notificationsEnabled') ?? true;
       _selectedLanguage = prefs.getString('selectedLanguage') ?? 'Français';
       _profileCardBlurEnabled =
           prefs.getBool('profileCardBlurEnabled') ?? false;
@@ -112,14 +118,11 @@ class _ProfilePageState extends State<ProfilePage> {
       if (!mounted) return;
 
       final data = userDoc.data() as Map<String, dynamic>? ?? {};
-
       final friendsList = List<String>.from(data['friends'] ?? []);
 
-      // 1. On récupère le nom complet depuis le champ 'name' (au lieu de 'firstName')
       final String fullName = data['name'] ?? '';
-
-      // 2. On prend seulement le premier mot (le prénom) pour l'affichage
-      final String firstName = fullName.split(' ').first;
+      final String firstName =
+          fullName.isNotEmpty ? fullName.split(' ').first : '';
 
       setState(() {
         _name = firstName;
@@ -236,22 +239,526 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  Future<List<Map<String, dynamic>>> _fetchUserItems(
-    String collectionName,
+  // ═══════════════════════════════════════════════════════════════════════
+  // GESTION DU CLIC SUR UNE ÉPINGLE
+  // ═══════════════════════════════════════════════════════════════════════
+  Future<void> _handlePinTap(
+    Map<String, dynamic> pinnedData,
+    String itemType,
   ) async {
+    // Affiche un loader pendant la récupération des données complètes
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
+
     try {
-      QuerySnapshot snapshot =
-          await _firestore
-              .collection(collectionName)
-              .where('userId', isEqualTo: _currentUser.uid)
-              .get();
-      return snapshot.docs
-          .map((doc) => {...doc.data() as Map<String, dynamic>, 'id': doc.id})
-          .toList();
+      final docId = pinnedData['id'];
+
+      if (itemType == 'journee') {
+        final doc = await _firestore.collection('journees').doc(docId).get();
+        Navigator.pop(context); // Ferme le loader
+
+        if (doc.exists) {
+          final journee = JourneeModel.fromFirestore(doc);
+          _showJourneeDetailDialog(journee);
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Journée introuvable (peut-être supprimée).'),
+            ),
+          );
+        }
+      } else {
+        final doc = await _firestore.collection('souvenirs').doc(docId).get();
+        Navigator.pop(context); // Ferme le loader
+
+        if (doc.exists) {
+          final souvenir = SouvenirModel.fromFirestore(doc);
+          _showSouvenirDetailDialog(souvenir);
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Souvenir introuvable (peut-être supprimé).'),
+            ),
+          );
+        }
+      }
     } catch (e) {
-      print('Erreur de récupération de $collectionName : $e');
-      return [];
+      Navigator.pop(context); // Ferme le loader en cas d'erreur
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Erreur: $e')));
     }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // POPUP JOURNEE (Identique à home_page)
+  // ═══════════════════════════════════════════════════════════════════════
+  void _showJourneeDetailDialog(JourneeModel journee) {
+    final isDark = _appBrightness == Brightness.dark;
+
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: '',
+      barrierColor: Colors.transparent,
+      transitionDuration: const Duration(milliseconds: 280),
+      transitionBuilder: (ctx, anim1, anim2, child) {
+        return FadeTransition(
+          opacity: CurvedAnimation(parent: anim1, curve: Curves.easeOut),
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.90, end: 1.0).animate(
+              CurvedAnimation(parent: anim1, curve: Curves.easeOutBack),
+            ),
+            child: child,
+          ),
+        );
+      },
+      pageBuilder: (ctx, anim1, anim2) {
+        return BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 14.0, sigmaY: 14.0),
+          child: Material(
+            color: Colors.black.withValues(alpha: 0.55),
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 24,
+                ),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight: MediaQuery.of(context).size.height * 0.85,
+                      maxWidth: MediaQuery.of(context).size.width,
+                    ),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.grey.shade900 : Colors.white,
+                        borderRadius: BorderRadius.circular(24),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Colors.black38,
+                            blurRadius: 24,
+                            spreadRadius: 2,
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // ── Header ──
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 16, 8, 0),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    '${journee.date.day.toString().padLeft(2, '0')}/'
+                                    '${journee.date.month.toString().padLeft(2, '0')}/'
+                                    '${journee.date.year}',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color:
+                                          isDark
+                                              ? Colors.white
+                                              : Colors.black87,
+                                    ),
+                                  ),
+                                ),
+                                IconButton(
+                                  tooltip: 'Modifier',
+                                  icon: Icon(
+                                    Icons.edit_outlined,
+                                    color:
+                                        isDark
+                                            ? Colors.blue.shade300
+                                            : Colors.blue,
+                                  ),
+                                  onPressed: () {
+                                    Navigator.of(ctx).pop();
+                                    _modifierJournee(journee);
+                                  },
+                                ),
+                                IconButton(
+                                  icon: Icon(
+                                    Icons.close,
+                                    color:
+                                        isDark
+                                            ? Colors.grey.shade400
+                                            : Colors.grey.shade600,
+                                  ),
+                                  onPressed: () => Navigator.of(ctx).pop(),
+                                ),
+                              ],
+                            ),
+                          ),
+                          // ── Content ──
+                          Flexible(
+                            child: SingleChildScrollView(
+                              padding: const EdgeInsets.fromLTRB(
+                                20,
+                                10,
+                                20,
+                                20,
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  if (journee.emoji != null) ...[
+                                    Text(
+                                      journee.emoji!,
+                                      style: const TextStyle(fontSize: 36),
+                                    ),
+                                    const SizedBox(height: 8),
+                                  ],
+                                  Text(
+                                    journee.texte1 ?? '',
+                                    style: TextStyle(
+                                      fontSize: _calculateFontSize(
+                                        journee.texte1 ?? '',
+                                      ),
+                                      height: 1.65,
+                                      color:
+                                          isDark
+                                              ? Colors.grey.shade100
+                                              : Colors.black87,
+                                    ),
+                                  ),
+                                  if (journee.note != null) ...[
+                                    const SizedBox(height: 14),
+                                    Row(
+                                      children: [
+                                        const Icon(
+                                          Icons.star_rounded,
+                                          color: Colors.amber,
+                                          size: 20,
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          'Note : ${journee.note}',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.blueGrey.shade700,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                  if (journee.photoUrls.isNotEmpty) ...[
+                                    const SizedBox(height: 14),
+                                    SizedBox(
+                                      height: 120,
+                                      child: ListView.builder(
+                                        scrollDirection: Axis.horizontal,
+                                        itemCount: journee.photoUrls.length,
+                                        itemBuilder:
+                                            (_, i) => Padding(
+                                              padding: const EdgeInsets.only(
+                                                right: 8,
+                                              ),
+                                              child: ClipRRect(
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                                child: Image.network(
+                                                  journee.photoUrls[i],
+                                                  width: 120,
+                                                  height: 120,
+                                                  fit: BoxFit.cover,
+                                                ),
+                                              ),
+                                            ),
+                                      ),
+                                    ),
+                                  ],
+                                  if ((journee.motsCles ?? []).isNotEmpty) ...[
+                                    const SizedBox(height: 14),
+                                    Wrap(
+                                      spacing: 6,
+                                      runSpacing: 4,
+                                      children:
+                                          (journee.motsCles ?? [])
+                                              .map(
+                                                (k) => Chip(
+                                                  label: Text(
+                                                    k,
+                                                    style: const TextStyle(
+                                                      fontSize: 11,
+                                                    ),
+                                                  ),
+                                                  visualDensity:
+                                                      VisualDensity.compact,
+                                                  padding: EdgeInsets.zero,
+                                                ),
+                                              )
+                                              .toList(),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // POPUP SOUVENIR (Identique à home_page)
+  // ═══════════════════════════════════════════════════════════════════════
+  void _showSouvenirDetailDialog(SouvenirModel souvenir) {
+    final isDark = _appBrightness == Brightness.dark;
+
+    final Map<String, Map<String, dynamic>> qualiteInfo = {
+      'nostalgie': {
+        'label': 'Nostalgie',
+        'icon': Icons.history,
+        'color': Colors.purple,
+      },
+      'jamaisOublie': {
+        'label': 'Jamais oublié',
+        'icon': Icons.favorite,
+        'color': Colors.red,
+      },
+      'bonheur': {
+        'label': 'Bonheur',
+        'icon': Icons.wb_sunny_rounded,
+        'color': Colors.orange,
+      },
+    };
+
+    String qKey = souvenir.qualite.toString().toLowerCase();
+    Map<String, dynamic> qInfo = qualiteInfo['bonheur']!; // Par défaut
+    if (qKey.contains('nostalgie')) qInfo = qualiteInfo['nostalgie']!;
+    if (qKey.contains('jamais')) qInfo = qualiteInfo['jamaisOublie']!;
+
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: '',
+      barrierColor: Colors.transparent,
+      transitionDuration: const Duration(milliseconds: 280),
+      transitionBuilder: (ctx, anim1, anim2, child) {
+        return FadeTransition(
+          opacity: CurvedAnimation(parent: anim1, curve: Curves.easeOut),
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.90, end: 1.0).animate(
+              CurvedAnimation(parent: anim1, curve: Curves.easeOutBack),
+            ),
+            child: child,
+          ),
+        );
+      },
+      pageBuilder: (ctx, anim1, anim2) {
+        return BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 14.0, sigmaY: 14.0),
+          child: Material(
+            color: Colors.black.withValues(alpha: 0.55),
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 24,
+                ),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight: MediaQuery.of(context).size.height * 0.85,
+                      maxWidth: MediaQuery.of(context).size.width,
+                    ),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.grey.shade900 : Colors.white,
+                        borderRadius: BorderRadius.circular(24),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Colors.black38,
+                            blurRadius: 24,
+                            spreadRadius: 2,
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // ── Header ──
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 16, 8, 0),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    '${souvenir.date.day.toString().padLeft(2, '0')}'
+                                    '/${souvenir.date.month.toString().padLeft(2, '0')}'
+                                    '/${souvenir.date.year}',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color:
+                                          isDark
+                                              ? Colors.white
+                                              : Colors.black87,
+                                    ),
+                                  ),
+                                ),
+                                IconButton(
+                                  tooltip: 'Modifier',
+                                  icon: Icon(
+                                    Icons.edit_outlined,
+                                    color:
+                                        isDark
+                                            ? Colors.blue.shade300
+                                            : Colors.blue,
+                                  ),
+                                  onPressed: () {
+                                    Navigator.of(ctx).pop();
+                                    _modifierSouvenir(souvenir);
+                                  },
+                                ),
+                                IconButton(
+                                  icon: Icon(
+                                    Icons.close,
+                                    color:
+                                        isDark
+                                            ? Colors.grey.shade400
+                                            : Colors.grey.shade600,
+                                  ),
+                                  onPressed: () => Navigator.of(ctx).pop(),
+                                ),
+                              ],
+                            ),
+                          ),
+                          // ── Content ──
+                          Flexible(
+                            child: SingleChildScrollView(
+                              padding: const EdgeInsets.fromLTRB(
+                                20,
+                                10,
+                                20,
+                                20,
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  // Qualité badge
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        qInfo['icon'] as IconData,
+                                        color: qInfo['color'] as Color,
+                                        size: 20,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        qInfo['label'] as String,
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          color: qInfo['color'] as Color,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Text(
+                                    souvenir.texte,
+                                    style: TextStyle(
+                                      fontSize: _calculateFontSize(
+                                        souvenir.texte,
+                                      ),
+                                      height: 1.65,
+                                      color:
+                                          isDark
+                                              ? Colors.grey.shade100
+                                              : Colors.black87,
+                                    ),
+                                  ),
+                                  if (souvenir.photoUrls.isNotEmpty) ...[
+                                    const SizedBox(height: 14),
+                                    SizedBox(
+                                      height: 120,
+                                      child: ListView.builder(
+                                        scrollDirection: Axis.horizontal,
+                                        itemCount: souvenir.photoUrls.length,
+                                        itemBuilder:
+                                            (_, i) => Padding(
+                                              padding: const EdgeInsets.only(
+                                                right: 8,
+                                              ),
+                                              child: ClipRRect(
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                                child: Image.network(
+                                                  souvenir.photoUrls[i],
+                                                  width: 120,
+                                                  height: 120,
+                                                  fit: BoxFit.cover,
+                                                ),
+                                              ),
+                                            ),
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // UTILITAIRES
+  // ═══════════════════════════════════════════════════════════════════════
+  double _calculateFontSize(String text) {
+    if (text.length < 50) return 18.0;
+    if (text.length < 100) return 16.0;
+    if (text.length < 200) return 15.0;
+    return 14.0;
+  }
+
+  void _modifierJournee(JourneeModel journee) {
+    // Redirection vers la page d'édition.
+    // Il faut que la route existe dans ton application.
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Naviguez vers la page d\'édition (à connecter avec votre routeur).',
+        ),
+      ),
+    );
+    // Exemple d'implémentation :
+    // Navigator.push(context, MaterialPageRoute(builder: (_) => JourneePage(journeeToEdit: journee))).then((_) => _loadPinnedItems());
+  }
+
+  void _modifierSouvenir(SouvenirModel souvenir) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Naviguez vers la page d\'édition (à connecter avec votre routeur).',
+        ),
+      ),
+    );
+    // Exemple d'implémentation :
+    // Navigator.push(context, MaterialPageRoute(builder: (_) => SouvenirPage(souvenirToEdit: souvenir))).then((_) => _loadPinnedItems());
   }
 
   Future<void> _selectItemToPin({
@@ -313,7 +820,6 @@ class _ProfilePageState extends State<ProfilePage> {
 
         return AlertDialog(
           title: const Text('Personnaliser l\'épingle'),
-          // LA CORRECTION EST ICI : on enveloppe le StatefulBuilder dans un SizedBox avec une largeur définie
           content: SizedBox(
             width: double.maxFinite,
             child: StatefulBuilder(
@@ -474,7 +980,7 @@ class _ProfilePageState extends State<ProfilePage> {
         likersSnapshot.docs.map((doc) async {
           final userDoc =
               await _firestore.collection('users').doc(doc.id).get();
-          final userData = userDoc.data() as Map<String, dynamic>?;
+          final userData = userDoc.data();
           final username = userData?['username'] ?? doc.data()['username'];
 
           return {
@@ -696,115 +1202,6 @@ class _ProfilePageState extends State<ProfilePage> {
         );
       },
     );
-  }
-
-  Future<void> _onPinTapped(
-    Map<String, dynamic> pinData,
-    String itemType,
-  ) async {
-    final String? docId = pinData['id'];
-    if (docId == null || !mounted) return;
-
-    final currentContext = context;
-    showDialog(
-      context: currentContext,
-      barrierDismissible: false,
-      builder: (context) => const Center(child: CircularProgressIndicator()),
-    );
-
-    try {
-      final DocumentSnapshot doc =
-          await (itemType == 'souvenir'
-              ? _firestore.collection('souvenirs').doc(docId).get()
-              : _firestore.collection('journees').doc(docId).get());
-      if (!mounted) return;
-      Navigator.of(currentContext).pop();
-      if (!doc.exists) throw Exception("$itemType introuvable");
-
-      final Map<String, dynamic> data =
-          doc.data() as Map<String, dynamic>? ?? {};
-      final String texte =
-          (itemType == 'souvenir'
-                  ? (data['texte'] ?? '')
-                  : (data['texte1'] ?? data['texte'] ?? ''))
-              as String;
-      final String? emoji = data['emoji'] as String?;
-      final List<dynamic> photos = data['photoUrls'] ?? [];
-
-      showDialog(
-        context: currentContext,
-        builder: (ctx) {
-          final bool isDarkMode = Theme.of(ctx).brightness == Brightness.dark;
-          return AlertDialog(
-            backgroundColor: isDarkMode ? Colors.grey.shade900 : Colors.white,
-            title: Text(
-              itemType == 'souvenir' ? 'Souvenir' : 'Journée',
-              style: TextStyle(
-                color: isDarkMode ? Colors.white : Colors.black87,
-              ),
-            ),
-            // LA CORRECTION EST ICI : Ajout du SizedBox(width: double.maxFinite) pour éviter l'erreur de RenderIntrinsicWidth
-            content: SizedBox(
-              width: double.maxFinite,
-              child: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (emoji != null)
-                      Text(emoji, style: const TextStyle(fontSize: 28)),
-                    const SizedBox(height: 8),
-                    Text(
-                      texte,
-                      style: TextStyle(
-                        color: isDarkMode ? Colors.white70 : Colors.black87,
-                      ),
-                    ),
-                    if (photos.isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        height: 120,
-                        child: ListView.builder(
-                          scrollDirection: Axis.horizontal,
-                          itemCount: photos.length,
-                          itemBuilder:
-                              (_, i) => Padding(
-                                padding: const EdgeInsets.only(right: 8),
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: Image.network(
-                                    photos[i].toString(),
-                                    width: 120,
-                                    height: 120,
-                                    fit: BoxFit.cover,
-                                  ),
-                                ),
-                              ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('Fermer'),
-              ),
-            ],
-          );
-        },
-      );
-    } catch (e) {
-      if (mounted) {
-        Navigator.of(currentContext).pop();
-        ScaffoldMessenger.of(currentContext).showSnackBar(
-          SnackBar(
-            content: Text("Erreur: Impossible de charger les détails ($e)."),
-          ),
-        );
-      }
-    }
   }
 
   Widget _buildVipAdvantage(IconData icon, String text) {
@@ -1061,7 +1458,10 @@ class _ProfilePageState extends State<ProfilePage> {
                     if (maybeData == null) {
                       _selectItemToPin(index: index, itemType: itemType);
                     } else {
-                      _onPinTapped(maybeData, itemType);
+                      _handlePinTap(
+                        maybeData,
+                        itemType,
+                      ); // APPEL DU NOUVEAU POPUP
                     }
                   },
                   isVipLocked: isVipSlot && !_isVip,
@@ -1080,8 +1480,6 @@ class _ProfilePageState extends State<ProfilePage> {
     required VoidCallback onTap,
     bool isVipLocked = false,
   }) {
-    // CORRECTION DES TAILLES : Passage de 200 à 160 de hauteur pour que le "+" soit identique
-    // visuellement à un pin rempli (qui donne souvent un effet carré/compact selon le BoxFit).
     if (isVipLocked) {
       return GestureDetector(
         onTap: onTap,
@@ -1149,11 +1547,10 @@ class _ProfilePageState extends State<ProfilePage> {
         contentPadding = const EdgeInsets.fromLTRB(16, 16, 16, 8);
     }
 
-
-
     final Color dateChipColor =
-        isDarkMode ? Colors.white.withOpacity(0.14) : Colors.black.withOpacity(0.42);
-    final Color dateTextColor = Colors.white;
+        isDarkMode
+            ? Colors.white.withOpacity(0.14)
+            : Colors.black.withOpacity(0.42);
 
     return GestureDetector(
       onTap: onTap,
@@ -1179,10 +1576,10 @@ class _ProfilePageState extends State<ProfilePage> {
                 );
               },
             ),
-              // On réduit l'ajout de padding en bas (+12 au lieu de +38) 
-              // pour rééquilibrer le centrage vertical tout en évitant la date.
-              Padding(
-              padding: contentPadding.copyWith(bottom: contentPadding.bottom + 12),
+            Padding(
+              padding: contentPadding.copyWith(
+                bottom: contentPadding.bottom + 12,
+              ),
               child: Align(
                 alignment: Alignment.center,
                 child: Text(
@@ -1195,10 +1592,7 @@ class _ProfilePageState extends State<ProfilePage> {
                     fontWeight: FontWeight.bold,
                     fontSize: 14,
                     height: 1.3,
-                    // Une seule ombre très douce, comme dans le 2ème fichier
-                    shadows: [
-                      Shadow(blurRadius: 4.0, color: Colors.black54),
-                    ],
+                    shadows: [Shadow(blurRadius: 4.0, color: Colors.black54)],
                   ),
                 ),
               ),
@@ -1209,7 +1603,10 @@ class _ProfilePageState extends State<ProfilePage> {
               bottom: 0,
               child: Center(
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 7,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: dateChipColor,
                     borderRadius: BorderRadius.circular(999),
@@ -1224,17 +1621,14 @@ class _ProfilePageState extends State<ProfilePage> {
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 9.5,
-                      fontWeight: FontWeight.w600, // Légèrement plus gras pour la lisibilité
+                      fontWeight: FontWeight.w600,
                       letterSpacing: 0.2,
-                      // Ombre douce
-                      shadows: [
-                        Shadow(blurRadius: 3.0, color: Colors.black87),
-                      ],
+                      shadows: [Shadow(blurRadius: 3.0, color: Colors.black87)],
                     ),
                   ),
+                ),
               ),
             ),
-            )
           ],
         ),
       ),
@@ -1315,9 +1709,16 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
+  Future<void> _launchOnboardingTutorial() async {
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const OnboardingTutorialPage()));
+  }
+
   void _showPersonalizationDialog() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     bool currentProfileCardBlur = _profileCardBlurEnabled;
+    final String initialThemeMode = prefs.getString('themeMode') ?? 'system';
 
     String currentThemeMode = prefs.getString('themeMode') ?? 'system';
     String selectedCardColor = prefs.getString('cardColor') ?? 'bleu';
@@ -1368,9 +1769,19 @@ class _ProfilePageState extends State<ProfilePage> {
       _ColorOption('bleu', Colors.blue.shade300, 'Bleu (Défaut)'),
       _ColorOption('vert', Colors.green.shade300, 'Vert'),
       _ColorOption('rouge', Colors.red.shade300, 'Rouge'),
-      _ColorOption('orange', Colors.orange.shade300, 'Orange (VIP)', isVip: true),
+      _ColorOption(
+        'orange',
+        Colors.orange.shade300,
+        'Orange (VIP)',
+        isVip: true,
+      ),
       _ColorOption('jaune', Colors.yellow.shade400, 'Jaune (VIP)', isVip: true),
-      _ColorOption('violet', Colors.purple.shade300, 'Violet (VIP)', isVip: true),
+      _ColorOption(
+        'violet',
+        Colors.purple.shade300,
+        'Violet (VIP)',
+        isVip: true,
+      ),
       _ColorOption('rose', Colors.pink.shade200, 'Rose (VIP)', isVip: true),
       _ColorOption('blanc', Colors.grey.shade200, 'Blanc (VIP)', isVip: true),
     ];
@@ -1611,21 +2022,27 @@ class _ProfilePageState extends State<ProfilePage> {
                 ),
                 ElevatedButton(
                   onPressed: () async {
-                    await _savePersonalizationPreferences(
-                      themeMode: currentThemeMode,
-                      cardColor: selectedCardColor,
-                      cardAnimation: selectedCardAnimation,
-                      journeeCardColor: selectedJourneeCardColor,
-                      journeeAnimation: selectedJourneeAnimation,
-                      cardDesign: selectedCardDesign,
-                      journeeCardDesign: selectedJourneeCardDesign,
-                      animationSpeed: selectedAnimationSpeed,
-                      cardSize: selectedCardSize,
-                      profileCardBlurEnabled: currentProfileCardBlur,
-                      forceGlobalJourneeColor: forceGlobalJourneeColor,
-                      forceGlobalSouvenirColor: forceGlobalSouvenirColor,
-                    );
+                    final bool shouldPromptRestart =
+                        await _savePersonalizationPreferences(
+                          themeMode: currentThemeMode,
+                          cardColor: selectedCardColor,
+                          cardAnimation: selectedCardAnimation,
+                          journeeCardColor: selectedJourneeCardColor,
+                          journeeAnimation: selectedJourneeAnimation,
+                          cardDesign: selectedCardDesign,
+                          journeeCardDesign: selectedJourneeCardDesign,
+                          animationSpeed: selectedAnimationSpeed,
+                          cardSize: selectedCardSize,
+                          profileCardBlurEnabled: currentProfileCardBlur,
+                          forceGlobalJourneeColor: forceGlobalJourneeColor,
+                          forceGlobalSouvenirColor: forceGlobalSouvenirColor,
+                        );
                     if (mounted) Navigator.pop(dialogContext);
+                    if (mounted &&
+                        shouldPromptRestart &&
+                        currentThemeMode != initialThemeMode) {
+                      await _showRestartRequiredDialog();
+                    }
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.blue.shade700,
@@ -1634,6 +2051,132 @@ class _ProfilePageState extends State<ProfilePage> {
                   child: const Text('Enregistrer'),
                 ),
               ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showNotificationSettingsDialog() async {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) return;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor:
+          _appBrightness == Brightness.dark ? Colors.grey[900] : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return FutureBuilder<DocumentSnapshot>(
+          future: _firestore.collection('users').doc(currentUser.uid).get(),
+          builder: (context, snapshot) {
+            if (!snapshot.hasData) {
+              return const SizedBox(
+                height: 200,
+                child: Center(child: CircularProgressIndicator()),
+              );
+            }
+
+            final data = snapshot.data?.data() as Map<String, dynamic>?;
+            final Map<String, dynamic> prefs =
+                data?['notificationPrefs'] as Map<String, dynamic>? ?? {};
+
+            return StatefulBuilder(
+              builder: (BuildContext context, StateSetter setModalState) {
+                final isDark = _appBrightness == Brightness.dark;
+                final textColor = isDark ? Colors.white : Colors.black;
+
+                Widget buildToggle(String key, String label, IconData icon) {
+                  return SwitchListTile(
+                    title: Text(label, style: TextStyle(color: textColor)),
+                    secondary: Icon(icon, color: Colors.blue),
+                    activeColor: Colors.blue,
+                    value: prefs[key] ?? true,
+                    onChanged: (val) async {
+                      setModalState(() => prefs[key] = val);
+                      await _firestore
+                          .collection('users')
+                          .doc(currentUser.uid)
+                          .update({'notificationPrefs.$key': val});
+                    },
+                  );
+                }
+
+                return DraggableScrollableSheet(
+                  initialChildSize: 0.7,
+                  maxChildSize: 0.9,
+                  minChildSize: 0.4,
+                  expand: false,
+                  builder:
+                      (_, controller) => ListView(
+                        controller: controller,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.all(16.0),
+                            child: Text(
+                              'Notifications',
+                              style: TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                                color: textColor,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                          buildToggle(
+                            'post_amis',
+                            'Nouveaux posts de mes amis',
+                            Icons.auto_stories,
+                          ),
+                          buildToggle(
+                            'demande_amis',
+                            "Demandes d'amis",
+                            Icons.person_add,
+                          ),
+                          buildToggle(
+                            'amis_retour',
+                            'Amis qui m\'ont accepté',
+                            Icons.how_to_reg,
+                          ),
+                          buildToggle(
+                            'mentions_tags',
+                            'Mentions',
+                            Icons.alternate_email,
+                          ),
+                          buildToggle(
+                            'commentaires',
+                            'Commentaires sur mes posts',
+                            Icons.chat_bubble_outline,
+                          ),
+                          buildToggle(
+                            'reactions',
+                            'Réactions sur mes posts',
+                            Icons.favorite_border,
+                          ),
+                          const Divider(),
+                          buildToggle(
+                            'memories',
+                            'Memories (Ce jour-là)',
+                            Icons.history,
+                          ),
+                          buildToggle(
+                            'post_populaire',
+                            'Posts populaires de mes amis',
+                            Icons.trending_up,
+                          ),
+                          buildToggle(
+                            'recommandations',
+                            "Recommandations d'amis",
+                            Icons.people_alt,
+                          ),
+                        ],
+                      ),
+                );
+              },
             );
           },
         );
@@ -1928,7 +2471,7 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  Future<void> _savePersonalizationPreferences({
+  Future<bool> _savePersonalizationPreferences({
     required String themeMode,
     required String cardColor,
     required String cardAnimation,
@@ -1955,6 +2498,7 @@ class _ProfilePageState extends State<ProfilePage> {
       await prefs.setString('cardSize', cardSize);
       await prefs.setBool('forceGlobalJourneeColor', forceGlobalJourneeColor);
       await prefs.setBool('forceGlobalSouvenirColor', forceGlobalSouvenirColor);
+
       await _firestore.collection('users').doc(_currentUser.uid).update({
         'profileCardBlurEnabled': profileCardBlurEnabled,
       });
@@ -1994,18 +2538,71 @@ class _ProfilePageState extends State<ProfilePage> {
           _profileCardBlurEnabled = profileCardBlurEnabled;
         });
 
+        // Met à jour globalement si HomePageState est présent dans l'arbre
+        // (Peut ne pas être le cas ici directement, mais par sécurité)
         final homePageState = context.findAncestorStateOfType<HomePageState>();
         homePageState?.appBrightnessNotifier.value = _appBrightness;
+
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Préférences enregistrées!')),
         );
       }
+
+      return themeMode == 'dark' || themeMode == 'light';
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Échec de l\'enregistrement: $e')),
         );
+      }
+      return false;
     }
+  }
+
+  Future<void> _showRestartRequiredDialog() async {
+    if (!mounted) return;
+
+    await showDialog(
+      context: context,
+      builder: (dialogContext) {
+        final isDarkMode =
+            Theme.of(dialogContext).brightness == Brightness.dark;
+        return AlertDialog(
+          backgroundColor: isDarkMode ? Colors.blueGrey.shade900 : Colors.white,
+          title: Text(
+            'Redémarrage conseillé',
+            style: TextStyle(
+              color: isDarkMode ? Colors.white : Colors.black,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          content: Text(
+            'Le nouveau thème sera mieux pris en compte après un redémarrage de l’application. Voulez-vous relancer maintenant ?',
+            style: TextStyle(
+              color: isDarkMode ? Colors.white70 : Colors.black87,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text(
+                'Plus tard',
+                style: TextStyle(
+                  color: isDarkMode ? Colors.white70 : Colors.black54,
+                ),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+                RestartWidget.restartApp(context);
+              },
+              child: const Text('Relancer maintenant'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Future<void> _logout() async {
@@ -2132,8 +2729,7 @@ class _ProfilePageState extends State<ProfilePage> {
           return SingleChildScrollView(
             child: Column(
               children: [
-                const SizedBox(height:
-                      20),
+                const SizedBox(height: 20),
                 _buildProfileHeader(isDarkMode),
                 const SizedBox(height: 20),
                 _buildBioSection(isDarkMode),
@@ -2276,30 +2872,19 @@ class _ProfilePageState extends State<ProfilePage> {
                   ),
                   _buildSettingTile(
                     icon: Icons.notifications,
-                    title: 'Notifications',
+                    title: 'Gérer les notifications',
                     isDarkMode: isDarkMode,
-                    trailing: Switch(
-                      value: _notificationsEnabled,
-                      onChanged: (bool value) async {
-                        SharedPreferences prefs =
-                            await SharedPreferences.getInstance();
-                        await prefs.setBool('notificationsEnabled', value);
-                        if (mounted) {
-                          setState(() {
-                            _notificationsEnabled = value;
-                          });
-                        }
-                      },
-                      activeColor: Colors.blue.shade700,
-                      inactiveThumbColor:
+                    trailing: Icon(
+                      Icons.chevron_right,
+                      color:
                           isDarkMode
-                              ? Colors.grey.shade600
-                              : Colors.grey.shade400,
-                      inactiveTrackColor:
-                          isDarkMode
-                              ? Colors.grey.shade800
-                              : Colors.grey.shade300,
+                              ? Colors.grey.shade400
+                              : Colors.grey.shade700,
                     ),
+                    onTap: () {
+                      Navigator.pop(context);
+                      _showNotificationSettingsDialog();
+                    },
                   ),
                   _buildSettingTile(
                     icon: Icons.palette,
@@ -2308,6 +2893,15 @@ class _ProfilePageState extends State<ProfilePage> {
                     onTap: () {
                       Navigator.pop(context);
                       _showPersonalizationDialog();
+                    },
+                  ),
+                  _buildSettingTile(
+                    icon: Icons.school_outlined,
+                    title: 'Tutoriel d\'intégration',
+                    isDarkMode: isDarkMode,
+                    onTap: () {
+                      Navigator.pop(context);
+                      _launchOnboardingTutorial();
                     },
                   ),
                   _buildSettingTile(

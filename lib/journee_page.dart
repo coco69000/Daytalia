@@ -22,17 +22,16 @@ import 'main.dart'; // Assurez-vous que cette importation est correcte pour votr
 import 'journee_model.dart'; // Assurez-vous que cette importation est correcte
 import 'souvenir_model.dart'; // Importez le modèle de souvenir
 import 'home_page.dart' show getUserSubscriptionData, showVipPromotionPopup;
+import 'notification_service.dart';
 import 'ai_model_selector.dart';
+import 'theme_manager.dart';
 
 // Définissez SouvenirQualite si ce n'est pas déjà dans souvenir_model.dart
 
-// THEME: Variable d'état pour le mode sombre avec ValueNotifier
-final ValueNotifier<Brightness> appBrightnessNotifier = ValueNotifier<Brightness>(Brightness.light);
-
 // AJOUTÉ : Clé API nécessaire pour l'analyse des éléments intéressants.
 // (À NE PAS LAISSER EN DUR EN PRODUCTION !)
-const String DEEPSEEK_API_KEY = 'HA2RvSG1u7aE7u78yXd1UqnBuMY6VV70'; // REMPLACEZ PAR VOTRE VRAIE CLÉ !
-
+const String DEEPSEEK_API_KEY =
+    'HA2RvSG1u7aE7u78yXd1UqnBuMY6VV70'; // REMPLACEZ PAR VOTRE VRAIE CLÉ !
 
 class JourneePage extends StatefulWidget {
   final JourneeModel? journeeToEdit;
@@ -41,7 +40,8 @@ class JourneePage extends StatefulWidget {
   const JourneePage({super.key, this.journeeToEdit, this.journeeToRepublish});
 
   @override
-  _JourneePageState createState() => _JourneePageState(originalJourneeToRepublish: journeeToRepublish);
+  _JourneePageState createState() =>
+      _JourneePageState(originalJourneeToRepublish: journeeToRepublish);
 }
 
 class _JourneePageState extends State<JourneePage> {
@@ -67,8 +67,10 @@ class _JourneePageState extends State<JourneePage> {
   // REMOVED: bool _isCommentEnabled = true; // Plus besoin car plus de section commentaire
   double _manualProgress = 50.0; // Initialisé à 50
   // REMOVED: bool _isManualProgressActive = false; // Plus pertinent
-  bool _isEditingManualNote = false; // Indique si le slider de note manuelle est actuellement affiché
-  bool _manualNoteSelected = false; // Indique si une note manuelle a été explicitement choisie (via slider)
+  bool _isEditingManualNote =
+      false; // Indique si le slider de note manuelle est actuellement affiché
+  bool _manualNoteSelected =
+      false; // Indique si une note manuelle a été explicitement choisie (via slider)
 
   // Reconnaissance vocale
   late stt.SpeechToText _speech;
@@ -109,17 +111,17 @@ class _JourneePageState extends State<JourneePage> {
 
   // NOUVEAU : Variable d'état pour le statut VIP
   bool _isVip = false;
-  String? _selectedCardColor; // Couleur locale de la carte (null = suivre le global)
+  String?
+  _selectedCardColor; // Couleur locale de la carte (null = suivre le global)
 
   // CONSTRUCTEUR
   _JourneePageState({JourneeModel? originalJourneeToRepublish})
-      : _isRepublishing = originalJourneeToRepublish != null,
-        _originalJourneeToRepublish = originalJourneeToRepublish;
+    : _isRepublishing = originalJourneeToRepublish != null,
+      _originalJourneeToRepublish = originalJourneeToRepublish;
 
   @override
   void initState() {
     super.initState();
-    _loadAppBrightness();
     _speech = stt.SpeechToText();
     _loadFriends();
     _checkVipStatus();
@@ -135,7 +137,7 @@ class _JourneePageState extends State<JourneePage> {
       _loadJourneeForRepublishing();
     } else {
       // On charge l'état par défaut enregistré lors d'une nouvelle création
-      _loadDefaultPublicState(); 
+      _loadDefaultPublicState();
     }
   }
 
@@ -158,30 +160,6 @@ class _JourneePageState extends State<JourneePage> {
     super.dispose();
   }
 
-  // THEME: Nouvelle fonction pour charger la préférence de thème
-  Future<void>_loadAppBrightness() async {
-    try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      String? themeMode = prefs.getString('themeMode');
-
-      Brightness loadedBrightness = Brightness.light;
-      if (themeMode == 'dark') {
-        loadedBrightness = Brightness.dark;
-      } else if (themeMode == 'light') {
-        loadedBrightness = Brightness.light;
-      } else {
-        loadedBrightness =
-            WidgetsBinding.instance.platformDispatcher.platformBrightness;
-      }
-
-      if (mounted) {
-        appBrightnessNotifier.value = loadedBrightness;
-      }
-    } catch (e) {
-      print('Erreur de chargement de la couleur de fond : $e');
-    }
-  }
-
   // --- MÉTHODES DE CHARGEMENT ---
 
   // NOUVEAU : Méthode pour vérifier le statut VIP
@@ -200,7 +178,8 @@ class _JourneePageState extends State<JourneePage> {
   void _loadJourneeForRepublishing() {
     final originalJournee = _originalJourneeToRepublish!;
 
-    String mainContent = originalJournee.texte1 ?? originalJournee.commentaire ?? '\n';
+    String mainContent =
+        originalJournee.texte1 ?? originalJournee.commentaire ?? '\n';
     if (mainContent.trim().isEmpty) {
       mainContent = '\n';
     }
@@ -208,7 +187,9 @@ class _JourneePageState extends State<JourneePage> {
       mainContent += '\n';
     }
 
-    _controller.document = quill.Document.fromJson([{'insert': mainContent}]);
+    _controller.document = quill.Document.fromJson([
+      {'insert': mainContent},
+    ]);
 
     setState(() {
       _estPublic = originalJournee.estPublic;
@@ -228,7 +209,9 @@ class _JourneePageState extends State<JourneePage> {
     if (!contentToEdit.endsWith('\n')) {
       contentToEdit += '\n';
     }
-    _controller.document = quill.Document.fromJson([{'insert': contentToEdit}]);
+    _controller.document = quill.Document.fromJson([
+      {'insert': contentToEdit},
+    ]);
 
     setState(() {
       _estPublic = journee.estPublic;
@@ -245,7 +228,7 @@ class _JourneePageState extends State<JourneePage> {
         }
       }
       _displayImages.addAll(journee.photoUrls);
-      _mentionedUserIds = List<String>.from(journee.mentionedUserIds ?? []);
+      _mentionedUserIds = List<String>.from(journee.mentionedUserIds);
 
       if (journee.hiddenTextFriends != null &&
           journee.hiddenTextFriends!.isNotEmpty) {
@@ -258,10 +241,12 @@ class _JourneePageState extends State<JourneePage> {
           journee.hiddenTextDetails!.isNotEmpty) {
         _hiddenTextDetails.clear();
         _hiddenTextDetails.addAll(
-          journee.hiddenTextDetails!.map((d) => {
-            'text': d['text'] as String? ?? '',
-            'friendIds': List<String>.from(d['friendIds'] as List? ?? []),
-          }),
+          journee.hiddenTextDetails!.map(
+            (d) => {
+              'text': d['text'] as String? ?? '',
+              'friendIds': List<String>.from(d['friendIds'] as List? ?? []),
+            },
+          ),
         );
         _hasHiddenText = true;
       }
@@ -277,9 +262,15 @@ class _JourneePageState extends State<JourneePage> {
         final idx = fullText.indexOf(text);
         if (idx >= 0) {
           _controller.formatText(
-              idx, text.length, quill.Attribute.fromKeyValue('background', '#FFFF00'));
+            idx,
+            text.length,
+            quill.Attribute.fromKeyValue('background', '#FFFF00'),
+          );
           _controller.formatText(
-              idx, text.length, quill.Attribute.fromKeyValue('color', '#000000'));
+            idx,
+            text.length,
+            quill.Attribute.fromKeyValue('color', '#000000'),
+          );
         }
       }
     });
@@ -288,43 +279,59 @@ class _JourneePageState extends State<JourneePage> {
   // METHODE DE SELECTION DE COULEUR
   void _showColorPickerDialog() {
     final colors = {
-      'bleu': Colors.blue, 'vert': Colors.green, 'rouge': Colors.red,
-      'orange': Colors.orange, 'jaune': Colors.yellow, 'violet': Colors.purple, 'rose': Colors.pink, 'blanc': Colors.grey.shade300
+      'bleu': Colors.blue,
+      'vert': Colors.green,
+      'rouge': Colors.red,
+      'orange': Colors.orange,
+      'jaune': Colors.yellow,
+      'violet': Colors.purple,
+      'rose': Colors.pink,
+      'blanc': Colors.grey.shade300,
     };
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Couleur de cette publication'),
-        content: Wrap(
-          spacing: 12, runSpacing: 12,
-          children: colors.keys.map((String key) {
-            return GestureDetector(
-              onTap: () {
-                setState(() => _selectedCardColor = key);
-                Navigator.pop(context);
-              },
-              child: Container(
-                width: 40, height: 40,
-                decoration: BoxDecoration(
-                  color: colors[key],
-                  shape: BoxShape.circle,
-                  border: Border.all(color: _selectedCardColor == key ? Colors.black : Colors.transparent, width: 3),
-                ),
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Couleur de cette publication'),
+            content: Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children:
+                  colors.keys.map((String key) {
+                    return GestureDetector(
+                      onTap: () {
+                        setState(() => _selectedCardColor = key);
+                        Navigator.pop(context);
+                      },
+                      child: Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: colors[key],
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color:
+                                _selectedCardColor == key
+                                    ? Colors.black
+                                    : Colors.transparent,
+                            width: 3,
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  setState(() => _selectedCardColor = null);
+                  Navigator.pop(context);
+                },
+                child: const Text("Suivre le paramètre global"),
               ),
-            );
-          }).toList(),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              setState(() => _selectedCardColor = null);
-              Navigator.pop(context);
-            },
-            child: const Text("Suivre le paramètre global"),
-          )
-        ],
-      ),
+            ],
+          ),
     );
   }
 
@@ -332,13 +339,16 @@ class _JourneePageState extends State<JourneePage> {
 
   Future<void> _pickImages() async {
     try {
-      final List<XFile> pickedFiles = await _picker.pickMultiImage(imageQuality: 85);
+      final List<XFile> pickedFiles = await _picker.pickMultiImage(
+        imageQuality: 85,
+      );
       if (pickedFiles.isNotEmpty) {
         setState(() => _displayImages.addAll(pickedFiles));
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Erreur lors de la sélection d'images: $e")));
+        SnackBar(content: Text("Erreur lors de la sélection d'images: $e")),
+      );
     }
   }
 
@@ -350,7 +360,8 @@ class _JourneePageState extends State<JourneePage> {
     var status = await Permission.microphone.request();
     if (!status.isGranted) {
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Permission microphone refusée")));
+        const SnackBar(content: Text("Permission microphone refusée")),
+      );
       return;
     }
     if (_isListening) {
@@ -359,8 +370,8 @@ class _JourneePageState extends State<JourneePage> {
       return;
     }
     bool available = await _speech.initialize(
-      onStatus: (status) =>
-          setState(() => _isListening = status == 'listening'),
+      onStatus:
+          (status) => setState(() => _isListening = status == 'listening'),
       onError: (error) => setState(() => _isListening = false),
     );
     if (available) {
@@ -370,10 +381,13 @@ class _JourneePageState extends State<JourneePage> {
           if (result.finalResult) {
             final selection = _controller.selection;
             _controller.document.insert(
-                selection.baseOffset, result.recognizedWords);
+              selection.baseOffset,
+              result.recognizedWords,
+            );
             _controller.updateSelection(
               TextSelection.collapsed(
-                  offset: selection.baseOffset + result.recognizedWords.length),
+                offset: selection.baseOffset + result.recognizedWords.length,
+              ),
               quill.ChangeSource.local,
             );
           }
@@ -386,12 +400,22 @@ class _JourneePageState extends State<JourneePage> {
   Future<void> _analyserEtEnregistrer(bool avecNoteIA) async {
     final currentText = _controller.document.toPlainText().trim();
     if (currentText.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Veuillez écrire quelque chose à analyser.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Veuillez écrire quelque chose à analyser.'),
+        ),
+      );
       return;
     }
 
     if (currentText.length < _minTextLength) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Veuillez écrire au moins $_minTextLength caractères pour votre journée afin de procéder à l\'analyse IA.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Veuillez écrire au moins $_minTextLength caractères pour votre journée afin de procéder à l\'analyse IA.',
+          ),
+        ),
+      );
       return;
     }
 
@@ -405,7 +429,14 @@ class _JourneePageState extends State<JourneePage> {
         bool noteSuccess = await _obtenirNote(currentText);
         if (!noteSuccess) {
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Impossible d\'obtenir la note IA, utilisant 50/100 par défaut.'), backgroundColor: Colors.orange));
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Impossible d\'obtenir la note IA, utilisant 50/100 par défaut.',
+                ),
+                backgroundColor: Colors.orange,
+              ),
+            );
           }
           setState(() {
             _note = 50;
@@ -419,10 +450,16 @@ class _JourneePageState extends State<JourneePage> {
       }
 
       await _enregistrerJournee();
-
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Une erreur est survenue lors de l\'analyse ou l\'enregistrement : $e'), backgroundColor: Colors.red));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Une erreur est survenue lors de l\'analyse ou l\'enregistrement : $e',
+            ),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
     } finally {
       if (mounted) {
@@ -434,34 +471,52 @@ class _JourneePageState extends State<JourneePage> {
   Future<void> _enregistrerJournee() async {
     auth.User? currentUser = auth.FirebaseAuth.instance.currentUser;
     if (currentUser == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Vous devez être connecté')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Vous devez être connecté')));
       return;
     }
 
     final textePrincipal = _controller.document.toPlainText().trim();
 
-      // Calcul du texte masqué (parties cachées remplacées par des *)
-      String maskedText = textePrincipal;
-      for (var detail in _hiddenTextDetails) {
-        // trim() pour ignorer les \n de fin que Quill ajoute à la sélection
-        final hiddenText = (detail['text'] as String? ?? '').trim();
-        if (hiddenText.isNotEmpty) {
-          if (maskedText.contains(hiddenText)) {
-            maskedText = maskedText.replaceFirst(hiddenText, '*' * hiddenText.length);
-          } else {
-            // Fallback: normaliser les espaces/sauts de ligne pour la comparaison
-            final hiddenNorm = hiddenText.replaceAll(RegExp(r'\s+'), ' ');
-            final maskedNorm = maskedText.replaceAll(RegExp(r'\s+'), ' ');
-            if (maskedNorm.contains(hiddenNorm)) {
-              maskedText = maskedNorm.replaceFirst(hiddenNorm, '*' * hiddenNorm.length);
-            }
+    // Calcul du texte masqué (parties cachées remplacées par des *)
+    String maskedText = textePrincipal;
+    for (var detail in _hiddenTextDetails) {
+      // trim() pour ignorer les \n de fin que Quill ajoute à la sélection
+      final hiddenText = (detail['text'] as String? ?? '').trim();
+      if (hiddenText.isNotEmpty) {
+        if (maskedText.contains(hiddenText)) {
+          maskedText = maskedText.replaceFirst(
+            hiddenText,
+            '*' * hiddenText.length,
+          );
+        } else {
+          // Fallback: normaliser les espaces/sauts de ligne pour la comparaison
+          final hiddenNorm = hiddenText.replaceAll(RegExp(r'\s+'), ' ');
+          final maskedNorm = maskedText.replaceAll(RegExp(r'\s+'), ' ');
+          if (maskedNorm.contains(hiddenNorm)) {
+            maskedText = maskedNorm.replaceFirst(
+              hiddenNorm,
+              '*' * hiddenNorm.length,
+            );
           }
         }
       }
-      final String? texte1Masked = _hiddenTextDetails.isNotEmpty ? maskedText : null;
+    }
+    final String? texte1Masked =
+        _hiddenTextDetails.isNotEmpty ? maskedText : null;
     // Condition d'enregistrement générale
-    if (textePrincipal.isEmpty && _displayImages.isEmpty && _selectedEmoji == null && !_manualNoteSelected) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Veuillez écrire quelque chose, ajouter une image, un emoji ou une note manuelle.')));
+    if (textePrincipal.isEmpty &&
+        _displayImages.isEmpty &&
+        _selectedEmoji == null &&
+        !_manualNoteSelected) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Veuillez écrire quelque chose, ajouter une image, un emoji ou une note manuelle.',
+          ),
+        ),
+      );
       return;
     }
 
@@ -473,10 +528,17 @@ class _JourneePageState extends State<JourneePage> {
         if (item is XFile) {
           final userId = currentUser.uid;
           final fileExt = p.extension(item.name);
-          final fileName = '$userId/uploads/${DateTime.now().millisecondsSinceEpoch}_${p.basename(item.name)}';
+          final fileName =
+              '$userId/uploads/${DateTime.now().millisecondsSinceEpoch}_${p.basename(item.name)}';
           final fileBytes = await item.readAsBytes();
-          final ref = FirebaseStorage.instance.ref().child('photos').child(fileName);
-          final uploadTask = ref.putData(fileBytes, SettableMetadata(contentType: 'image/${fileExt.substring(1)}'));
+          final ref = FirebaseStorage.instance
+              .ref()
+              .child('photos')
+              .child(fileName);
+          final uploadTask = ref.putData(
+            fileBytes,
+            SettableMetadata(contentType: 'image/${fileExt.substring(1)}'),
+          );
           final snapshot = await uploadTask.whenComplete(() {});
           final imageUrl = await snapshot.ref.getDownloadURL();
           uploadedImageUrls.add(imageUrl);
@@ -485,7 +547,11 @@ class _JourneePageState extends State<JourneePage> {
         }
       }
 
-      DocumentSnapshot userDoc = await FirebaseFirestore.instance.collection('users').doc(currentUser.uid).get();
+      DocumentSnapshot userDoc =
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(currentUser.uid)
+              .get();
 
       final userData = userDoc.data() as Map<String, dynamic>? ?? {};
       final int qualiteDeVieActuelle = userData['qualiteDeVieActuelle'] ?? 50;
@@ -498,38 +564,56 @@ class _JourneePageState extends State<JourneePage> {
         noteFinale = _note ?? 50;
       }
 
-      int nouvelleQualiteDeVie = ((qualiteDeVieActuelle + noteFinale) / 2).round();
+      int nouvelleQualiteDeVie =
+          ((qualiteDeVieActuelle + noteFinale) / 2).round();
       String noteToSave = '$noteFinale/100';
 
       Map<String, dynamic> journeeData = {
-        'texte1': textePrincipal.isNotEmpty ? textePrincipal : null, // Store if not empty
+        'texte1':
+            textePrincipal.isNotEmpty
+                ? textePrincipal
+                : null, // Store if not empty
         'texte1Masked': texte1Masked, // Version avec * pour les non-autorisés
-        'hiddenTextDetails': _hiddenTextDetails.isNotEmpty
-            ? _hiddenTextDetails.map((d) => {
-                'text': d['text'],
-                'friendIds': List<String>.from(d['friendIds'] as List? ?? []),
-              }).toList()
-            : null,
+        'hiddenTextDetails':
+            _hiddenTextDetails.isNotEmpty
+                ? _hiddenTextDetails
+                    .map(
+                      (d) => {
+                        'text': d['text'],
+                        'friendIds': List<String>.from(
+                          d['friendIds'] as List? ?? [],
+                        ),
+                      },
+                    )
+                    .toList()
+                : null,
         'estPublic': _estPublic,
 
         // 👇 LA CORRECTION EST ICI 👇
-        'date': widget.journeeToEdit != null 
-            ? Timestamp.fromDate(widget.journeeToEdit!.date) 
-            : Timestamp.now(),
-        // 👆 FIN DE LA CORRECTION 👆
+        'date':
+            widget.journeeToEdit != null
+                ? Timestamp.fromDate(widget.journeeToEdit!.date)
+                : Timestamp.now(),
 
+        // 👆 FIN DE LA CORRECTION 👆
         'userId': currentUser.uid,
         'emoji': _selectedEmoji,
-        'commentaire': null, // REMOVED: Commentaire n'est plus un champ distinct de la UI
+        'commentaire':
+            null, // REMOVED: Commentaire n'est plus un champ distinct de la UI
         'note': noteToSave,
         'motsCles': _motsCles,
         'photoUrls': uploadedImageUrls,
         'cardColor': _selectedCardColor,
-        'hiddenTextFriends': _selectedFriendIds.isNotEmpty ? _selectedFriendIds : null,
+        'hiddenTextFriends':
+            _selectedFriendIds.isNotEmpty ? _selectedFriendIds : null,
         'mentionedUserIds': _mentionedUserIds,
         'isRepost': _isRepublishing,
-        'repostedFromUserId': _isRepublishing ? _originalJourneeToRepublish!.userId : null,
-        'repostedFromUserName': _isRepublishing ? await _getUsernameById(_originalJourneeToRepublish!.userId!) : null,
+        'repostedFromUserId':
+            _isRepublishing ? _originalJourneeToRepublish!.userId : null,
+        'repostedFromUserName':
+            _isRepublishing
+                ? await _getUsernameById(_originalJourneeToRepublish!.userId!)
+                : null,
       };
 
       if (userCountry != null && userCountry.isNotEmpty) {
@@ -539,17 +623,37 @@ class _JourneePageState extends State<JourneePage> {
       String? journeeId;
       if (widget.journeeToEdit != null) {
         journeeId = widget.journeeToEdit!.id;
-        await FirebaseFirestore.instance.collection('journees').doc(journeeId).update(journeeData);
+        await FirebaseFirestore.instance
+            .collection('journees')
+            .doc(journeeId)
+            .update(journeeData);
       } else {
-        DocumentReference docRef = await FirebaseFirestore.instance.collection('journees').add(journeeData);
+        DocumentReference docRef = await FirebaseFirestore.instance
+            .collection('journees')
+            .add(journeeData);
         journeeId = docRef.id;
+      }
+
+      if (_mentionedUserIds.isNotEmpty) {
+        final currentUserDoc =
+            await FirebaseFirestore.instance
+                .collection('users')
+                .doc(currentUser.uid)
+                .get();
+        final myUsername = currentUserDoc.data()?['username'] ?? 'Un ami';
+
+        for (String mentionedId in _mentionedUserIds) {
+          await NotificationService.notifyMention(mentionedId, myUsername);
+        }
       }
 
       if (_postAsSouvenir) {
         // Générer un résumé court (2-3 phrases max) en fonction de la préférence IA
         String souvenirTexte = textePrincipal;
         try {
-          final String? generated = await _generateSouvenirSummary(textePrincipal);
+          final String? generated = await _generateSouvenirSummary(
+            textePrincipal,
+          );
           if (generated != null && generated.trim().isNotEmpty) {
             souvenirTexte = generated.trim();
           }
@@ -567,38 +671,50 @@ class _JourneePageState extends State<JourneePage> {
           'commentaire': null, // Le commentaire n'est plus un champ distinct
           'qualite': SouvenirQualite.bonheur.toString(),
           'isRepost': _isRepublishing,
-          'repostedFromUserId': _isRepublishing ? _originalJourneeToRepublish!.userId : null,
+          'repostedFromUserId':
+              _isRepublishing ? _originalJourneeToRepublish!.userId : null,
         });
       }
 
-      await FirebaseFirestore.instance.collection('users')
+      await FirebaseFirestore.instance
+          .collection('users')
           .doc(currentUser.uid)
           .update({'qualiteDeVieActuelle': nouvelleQualiteDeVie});
 
       // Classify excerpts into biographical themes (fire-and-forget)
       if (textePrincipal.isNotEmpty && journeeId != null) {
-        _classifierExtraitsParThemes(textePrincipal, journeeId, widget.journeeToEdit?.date ?? DateTime.now());
+        _classifierExtraitsParThemes(
+          textePrincipal,
+          journeeId,
+          widget.journeeToEdit?.date ?? DateTime.now(),
+        );
       }
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
             content: Text('Journée enregistrée !'),
-            backgroundColor: Colors.green));
+            backgroundColor: Colors.green,
+          ),
+        );
         if (Navigator.canPop(context)) {
           Navigator.pop(context, true);
         } else {
           Navigator.pushAndRemoveUntil(
             context,
             MaterialPageRoute(builder: (context) => const HomeBarrePage()),
-                (route) => false,
+            (route) => false,
           );
         }
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
             content: Text('Erreur lors de l\'enregistrement : $e'),
-            backgroundColor: Colors.red));
+            backgroundColor: Colors.red,
+          ),
+        );
       }
     } finally {
       if (mounted) {
@@ -609,21 +725,56 @@ class _JourneePageState extends State<JourneePage> {
 
   String normaliserId(String texte) {
     final Map<String, String> accentsMap = {
-      'à': 'a', 'á': 'a', 'â': 'a', 'ã': 'a', 'ä': 'a',
+      'à': 'a',
+      'á': 'a',
+      'â': 'a',
+      'ã': 'a',
+      'ä': 'a',
       'ç': 'c',
-      'è': 'e', 'é': 'e', 'ê': 'e', 'ë': 'e',
-      'ì': 'i', 'í': 'i', 'î': 'i', 'ï': 'i',
+      'è': 'e',
+      'é': 'e',
+      'ê': 'e',
+      'ë': 'e',
+      'ì': 'i',
+      'í': 'i',
+      'î': 'i',
+      'ï': 'i',
       'ñ': 'n',
-      'ò': 'o', 'ó': 'o', 'ô': 'o', 'õ': 'o', 'ö': 'o',
-      'ù': 'u', 'ú': 'u', 'û': 'u', 'ü': 'u',
-      'ý': 'y', 'ÿ': 'y',
-      'À': 'a', 'Á': 'a', 'Â': 'a', 'Ã': 'a', 'Ä': 'a',
+      'ò': 'o',
+      'ó': 'o',
+      'ô': 'o',
+      'õ': 'o',
+      'ö': 'o',
+      'ù': 'u',
+      'ú': 'u',
+      'û': 'u',
+      'ü': 'u',
+      'ý': 'y',
+      'ÿ': 'y',
+      'À': 'a',
+      'Á': 'a',
+      'Â': 'a',
+      'Ã': 'a',
+      'Ä': 'a',
       'Ç': 'c',
-      'È': 'e', 'É': 'e', 'Ê': 'e', 'Ë': 'e',
-      'Ì': 'i', 'Í': 'i', 'Î': 'i', 'Ï': 'i',
+      'È': 'e',
+      'É': 'e',
+      'Ê': 'e',
+      'Ë': 'e',
+      'Ì': 'i',
+      'Í': 'i',
+      'Î': 'i',
+      'Ï': 'i',
       'Ñ': 'n',
-      'Ò': 'o', 'Ó': 'o', 'Ô': 'o', 'Õ': 'o', 'Ö': 'o',
-      'Ù': 'u', 'Ú': 'u', 'Û': 'u', 'Ü': 'u',
+      'Ò': 'o',
+      'Ó': 'o',
+      'Ô': 'o',
+      'Õ': 'o',
+      'Ö': 'o',
+      'Ù': 'u',
+      'Ú': 'u',
+      'Û': 'u',
+      'Ü': 'u',
       'Ý': 'y',
     };
 
@@ -659,7 +810,8 @@ class _JourneePageState extends State<JourneePage> {
           'messages': [
             {
               'role': 'user',
-              'content': '''Analyse ce texte et extrais les éléments intéressants qui pourraient être expliqués dans une biographie.
+              'content':
+                  '''Analyse ce texte et extrais les éléments intéressants qui pourraient être expliqués dans une biographie.
           Pour chaque élément, détermine une catégorie thématique générale (comme "amis", "travail", "famille", "loisirs", "santé", "voyage", "éducation", "événements").
           Utilise uniquement des mots simples et des catégories générales.
           Réponds STRICTEMENT au format JSON suivant, sans aucun texte supplémentaire, ni préambule, ni postface. Assure-toi que la liste 'elements' est toujours présente, même vide:
@@ -673,8 +825,8 @@ class _JourneePageState extends State<JourneePage> {
             ]
           }
 
-          Texte à analyser : $texte'''
-            }
+          Texte à analyser : $texte''',
+            },
           ],
           'max_tokens': 500,
         }),
@@ -682,8 +834,12 @@ class _JourneePageState extends State<JourneePage> {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(utf8.decode(response.bodyBytes));
-        String elementsText = data['choices']?[0]['message']['content']?.toString() ?? '';
-        elementsText = elementsText.trim().replaceAll(RegExp(r'^```json\s*|\s*```$'), '');
+        String elementsText =
+            data['choices']?[0]['message']['content']?.toString() ?? '';
+        elementsText = elementsText.trim().replaceAll(
+          RegExp(r'^```json\s*|\s*```$'),
+          '',
+        );
 
         Map<String, dynamic>? parsedElements;
         try {
@@ -691,7 +847,9 @@ class _JourneePageState extends State<JourneePage> {
         } catch (_) {
           try {
             final sanitized = elementsText.replaceAllMapped(
-                RegExp(r'[\x00-\x1F]'), (m) => ' ');
+              RegExp(r'[\x00-\x1F]'),
+              (m) => ' ',
+            );
             parsedElements = jsonDecode(sanitized);
           } catch (e) {
             print("Erreur de parsing JSON pour les éléments intéressants: $e");
@@ -700,20 +858,25 @@ class _JourneePageState extends State<JourneePage> {
         }
 
         if (parsedElements != null && parsedElements.containsKey('elements')) {
-          List<dynamic> elements = parsedElements['elements'] is List ? parsedElements['elements'] : [];
+          List<dynamic> elements =
+              parsedElements['elements'] is List
+                  ? parsedElements['elements']
+                  : [];
           if (elements.isEmpty) {
             print("Aucun élément intéressant identifié par l'IA.");
             return;
           }
 
-          final categoriesSnapshot = await FirebaseFirestore.instance
-              .collection('users')
-              .doc(currentUser.uid)
-              .collection('categories_elements')
-              .get();
+          final categoriesSnapshot =
+              await FirebaseFirestore.instance
+                  .collection('users')
+                  .doc(currentUser.uid)
+                  .collection('categories_elements')
+                  .get();
 
           Map<String, String> categoriesExistantes = {
-            for (var doc in categoriesSnapshot.docs) normaliserId(doc.data()['nom'].toString()): doc.id
+            for (var doc in categoriesSnapshot.docs)
+              normaliserId(doc.data()['nom'].toString()): doc.id,
           };
 
           int elementsTraites = 0;
@@ -733,7 +896,10 @@ class _JourneePageState extends State<JourneePage> {
                   .doc(currentUser.uid)
                   .collection('categories_elements')
                   .doc(categorieNormalisee);
-              await newCategorieRef.set({'nom': categorieNom, 'createdAt': Timestamp.now()});
+              await newCategorieRef.set({
+                'nom': categorieNom,
+                'createdAt': Timestamp.now(),
+              });
               categorieId = categorieNormalisee;
               categoriesExistantes[categorieNormalisee] = categorieId;
             }
@@ -745,22 +911,26 @@ class _JourneePageState extends State<JourneePage> {
                 .doc(categorieId)
                 .collection('elements')
                 .add({
-              'texte': texteElement,
-              'explication': element['explication'] ?? '',
-              'date': Timestamp.now(),
-              'isRepost': false,
-              'repostedFromUserId': null,
-              'repostedFromUserName': null,
-            });
+                  'texte': texteElement,
+                  'explication': element['explication'] ?? '',
+                  'date': Timestamp.now(),
+                  'isRepost': false,
+                  'repostedFromUserId': null,
+                  'repostedFromUserName': null,
+                });
             elementsTraites++;
           }
           print('$elementsTraites éléments intéressants ont été enregistrés.');
         }
       } else {
-        print('Erreur API lors de l\'extraction des éléments : ${response.body}');
+        print(
+          'Erreur API lors de l\'extraction des éléments : ${response.body}',
+        );
       }
     } catch (e) {
-      print('Erreur globale lors de l\'enregistrement des éléments intéressants : $e');
+      print(
+        'Erreur globale lors de l\'enregistrement des éléments intéressants : $e',
+      );
     }
   }
 
@@ -773,9 +943,11 @@ class _JourneePageState extends State<JourneePage> {
 
     String instruction;
     if (iaPreference == 'ressenti') {
-      instruction = 'Reformule ce texte en un résumé très court (2 à 3 phrases maximum) en mettant l\'accent sur le ressenti émotionnel et ce qui a le plus compté dans la journée. Utilise un ton chaleureux et concis.';
+      instruction =
+          'Reformule ce texte en un résumé très court (2 à 3 phrases maximum) en mettant l\'accent sur le ressenti émotionnel et ce qui a le plus compté dans la journée. Utilise un ton chaleureux et concis.';
     } else {
-      instruction = 'Reformule ce texte en un résumé très court (2 à 3 phrases maximum) en focalisant sur les événements et la qualité générale de la journée. Sois précis et concis.';
+      instruction =
+          'Reformule ce texte en un résumé très court (2 à 3 phrases maximum) en focalisant sur les événements et la qualité générale de la journée. Sois précis et concis.';
     }
 
     const url = 'https://api.deepinfra.com/v1/openai/chat/completions';
@@ -789,7 +961,11 @@ class _JourneePageState extends State<JourneePage> {
         body: jsonEncode({
           'model': await resolveAiModel(),
           'messages': [
-            {'role': 'system', 'content': 'Tu es un assistant qui résume du texte en français de manière claire et concise.'},
+            {
+              'role': 'system',
+              'content':
+                  'Tu es un assistant qui résume du texte en français de manière claire et concise.',
+            },
             {'role': 'user', 'content': '$instruction\n\nTexte : $texte'},
           ],
           'max_tokens': 150,
@@ -803,9 +979,15 @@ class _JourneePageState extends State<JourneePage> {
         if (content == null) return null;
         String result = content.trim();
         // Supprimer les éventuels délimiteurs de code
-        result = result.replaceAll(RegExp(r'^```(?:json)?\s*|\s*```\s*\$', multiLine: false), '');
+        result = result.replaceAll(
+          RegExp(r'^```(?:json)?\s*|\s*```\s*\$', multiLine: false),
+          '',
+        );
         // Forcer à 2-3 phrases max : couper après 3 points.
-        final sentences = RegExp(r'([^.!?]+[.!?])').allMatches(result).map((m) => m.group(0)!.trim()).toList();
+        final sentences =
+            RegExp(
+              r'([^.!?]+[.!?])',
+            ).allMatches(result).map((m) => m.group(0)!.trim()).toList();
         if (sentences.isEmpty) return result;
         final limited = sentences.take(3).join(' ');
         return limited;
@@ -820,10 +1002,16 @@ class _JourneePageState extends State<JourneePage> {
   }
 
   /// Classifie des extraits de la journée dans des thèmes/sous-thèmes biographiques sur Firebase.
-  Future<void> _classifierExtraitsParThemes(String texte, String journeeId, DateTime dateEvent) async {
+  Future<void> _classifierExtraitsParThemes(
+    String texte,
+    String journeeId,
+    DateTime dateEvent,
+  ) async {
     auth.User? currentUser = auth.FirebaseAuth.instance.currentUser;
     if (currentUser == null || texte.isEmpty) return;
-    debugPrint('[THEME_CLASSIFY] ── Début classification journée $journeeId (${texte.length} chars) ──');
+    debugPrint(
+      '[THEME_CLASSIFY] ── Début classification journée $journeeId (${texte.length} chars) ──',
+    );
     const url = 'https://api.deepinfra.com/v1/openai/chat/completions';
     try {
       final response = await http.post(
@@ -838,11 +1026,13 @@ class _JourneePageState extends State<JourneePage> {
           'messages': [
             {
               'role': 'system',
-              'content': 'Tu es un assistant expert en analyse textuelle. Tu réponds UNIQUEMENT avec du JSON valide, sans aucun texte avant ou après le JSON. Ne fournis jamais d\'explication, de commentaire ou de texte en dehors de l\'objet JSON demandé.',
+              'content':
+                  'Tu es un assistant expert en analyse textuelle. Tu réponds UNIQUEMENT avec du JSON valide, sans aucun texte avant ou après le JSON. Ne fournis jamais d\'explication, de commentaire ou de texte en dehors de l\'objet JSON demandé.',
             },
             {
               'role': 'user',
-              'content': '''Analyse ce texte de journal intime et découpe-le en segments sémantiques significatifs. Pour CHAQUE segment pertinent :
+              'content':
+                  '''Analyse ce texte de journal intime et découpe-le en segments sémantiques significatifs. Pour CHAQUE segment pertinent :
 - Extrais le passage exact (une phrase ou groupe de phrases cohérentes).
 - Attribue un thème principal en UN seul mot (catégorie large : famille, travail, amour, santé, amis, loisirs, voyage, école, argent, spiritualité, enfance, nature, créativité, etc.).
 - Crée un sous-thème court et très descriptif de 3 à 7 mots (formule émotionnelle ou contextuelle précise, exemples : "Malheur à la maternelle", "Bonheur au nouveau travail", "Dispute avec un ami proche", "Peur de l\'avenir professionnel", "Fierté après une réussite scolaire", "Deuil d\'un proche aimé", "Nouveau départ dans une ville inconnue").
@@ -852,8 +1042,8 @@ RÈGLE ABSOLUE : Multiplie les extraits. Chaque émotion, événement ou context
 Réponds UNIQUEMENT avec ce JSON, sans aucun autre texte :
 {"extraits":[{"theme":"famille","sous_theme":"Dispute avec la mère ce matin","extrait":"passage exact tiré du texte"}]}
 
-Texte à analyser : $texte'''
-            }
+Texte à analyser : $texte''',
+            },
           ],
           'max_tokens': 2000,
         }),
@@ -864,12 +1054,17 @@ Texte à analyser : $texte'''
         return;
       }
       final data = jsonDecode(utf8.decode(response.bodyBytes));
-      String raw = (data['choices']?[0]['message']['content'] as String? ?? '').trim();
-      debugPrint('[THEME_CLASSIFY] Réponse brute IA: ${raw.length > 200 ? raw.substring(0, 200) : raw}');
+      String raw =
+          (data['choices']?[0]['message']['content'] as String? ?? '').trim();
+      debugPrint(
+        '[THEME_CLASSIFY] Réponse brute IA: ${raw.length > 200 ? raw.substring(0, 200) : raw}',
+      );
       raw = raw.replaceAll(RegExp(r'^```json\s*|\s*```$'), '');
       final jsonMatch = RegExp(r'\{.*\}', dotAll: true).firstMatch(raw);
       if (jsonMatch == null) {
-        debugPrint('[THEME_CLASSIFY] Impossible de trouver le JSON dans la réponse');
+        debugPrint(
+          '[THEME_CLASSIFY] Impossible de trouver le JSON dans la réponse',
+        );
         return;
       }
       Map<String, dynamic>? parsed;
@@ -877,8 +1072,9 @@ Texte à analyser : $texte'''
         parsed = jsonDecode(jsonMatch.group(0)!);
       } catch (_) {
         try {
-          final sanitized = jsonMatch.group(0)!.replaceAllMapped(
-              RegExp(r'[\x00-\x1F]'), (m) => ' ');
+          final sanitized = jsonMatch
+              .group(0)!
+              .replaceAllMapped(RegExp(r'[\x00-\x1F]'), (m) => ' ');
           parsed = jsonDecode(sanitized);
         } catch (e) {
           debugPrint('[THEME_CLASSIFY] Erreur parsing JSON: $e');
@@ -898,38 +1094,59 @@ Texte à analyser : $texte'''
         final theme = (extrait['theme'] as String? ?? '').trim();
         final sousTheme = (extrait['sous_theme'] as String? ?? '').trim();
         final texteExtrait = (extrait['extrait'] as String? ?? '').trim();
-        if (theme.isEmpty || sousTheme.isEmpty || texteExtrait.isEmpty) continue;
+        if (theme.isEmpty || sousTheme.isEmpty || texteExtrait.isEmpty)
+          continue;
         final themeId = normaliserId(theme);
         final sousThemeId = normaliserId(sousTheme);
-        debugPrint('[THEME_CLASSIFY] → thème="$theme" ($themeId) | sous-thème="$sousTheme" ($sousThemeId)');
+        debugPrint(
+          '[THEME_CLASSIFY] → thème="$theme" ($themeId) | sous-thème="$sousTheme" ($sousThemeId)',
+        );
         final themeRef = db
             .collection('users')
             .doc(currentUser.uid)
             .collection('themes_biographiques')
             .doc(themeId);
-        await themeRef.set({'nom': theme, 'createdAt': Timestamp.now()}, SetOptions(merge: true));
-        final sousThemeRef = themeRef.collection('sous_themes').doc(sousThemeId);
-        await sousThemeRef.set(
-            {'nom': sousTheme, 'updatedAt': Timestamp.now()}, SetOptions(merge: true));
+        await themeRef.set({
+          'nom': theme,
+          'createdAt': Timestamp.now(),
+        }, SetOptions(merge: true));
+        final sousThemeRef = themeRef
+            .collection('sous_themes')
+            .doc(sousThemeId);
+        await sousThemeRef.set({
+          'nom': sousTheme,
+          'updatedAt': Timestamp.now(),
+        }, SetOptions(merge: true));
 
-        final startOfDay = DateTime(dateEvent.year, dateEvent.month, dateEvent.day);
+        final startOfDay = DateTime(
+          dateEvent.year,
+          dateEvent.month,
+          dateEvent.day,
+        );
         final endOfDay = startOfDay.add(const Duration(days: 1));
 
-        final existingSnap = await sousThemeRef.collection('extraits')
-            .where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
-            .where('date', isLessThan: Timestamp.fromDate(endOfDay))
-            .limit(1)
-            .get();
+        final existingSnap =
+            await sousThemeRef
+                .collection('extraits')
+                .where(
+                  'date',
+                  isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay),
+                )
+                .where('date', isLessThan: Timestamp.fromDate(endOfDay))
+                .limit(1)
+                .get();
 
         if (existingSnap.docs.isNotEmpty) {
           final doc = existingSnap.docs.first;
           final existingTexte = doc.get('texte') as String? ?? '';
           final mergedTexte = existingTexte + '\n' + texteExtrait;
           await doc.reference.update({
-             'texte': mergedTexte,
-             'lastAnalyzedAutobiographie': FieldValue.delete(), // Mettre à null pour repasser en IA si besoin
-             'journeeId': journeeId,
-             'sourceType': 'journee_et_souvenir', // On indique que ça peut être mixte
+            'texte': mergedTexte,
+            'lastAnalyzedAutobiographie':
+                FieldValue.delete(), // Mettre à null pour repasser en IA si besoin
+            'journeeId': journeeId,
+            'sourceType':
+                'journee_et_souvenir', // On indique que ça peut être mixte
           });
         } else {
           await sousThemeRef.collection('extraits').add({
@@ -941,7 +1158,9 @@ Texte à analyser : $texte'''
         }
         saved++;
       }
-      debugPrint('[THEME_CLASSIFY] ✓ $saved extraits enregistrés dans themes_biographiques (journée)');
+      debugPrint(
+        '[THEME_CLASSIFY] ✓ $saved extraits enregistrés dans themes_biographiques (journée)',
+      );
     } catch (e) {
       debugPrint('[THEME_CLASSIFY] EXCEPTION: $e');
     }
@@ -963,12 +1182,14 @@ Texte à analyser : $texte'''
           'messages': [
             {
               'role': 'system',
-              'content': 'Tu es un assistant qui répond UNIQUEMENT avec du JSON valide. Aucun texte avant ou après le JSON.',
+              'content':
+                  'Tu es un assistant qui répond UNIQUEMENT avec du JSON valide. Aucun texte avant ou après le JSON.',
             },
             {
               'role': 'user',
-              'content': 'Extrais 5 mots-clés importants de ce texte. Si tu en trouves plus, choisis les 5 plus importants. Réponds UNIQUEMENT avec ce JSON : {"mots_cles":["mot1","mot2","mot3","mot4","mot5"]}\n\nTexte : $texte'
-            }
+              'content':
+                  'Extrais 5 mots-clés importants de ce texte. Si tu en trouves plus, choisis les 5 plus importants. Réponds UNIQUEMENT avec ce JSON : {"mots_cles":["mot1","mot2","mot3","mot4","mot5"]}\n\nTexte : $texte',
+            },
           ],
           'max_tokens': 150,
         }),
@@ -976,23 +1197,32 @@ Texte à analyser : $texte'''
 
       if (response.statusCode == 200) {
         final data = jsonDecode(utf8.decode(response.bodyBytes));
-        String content = data['choices']?[0]['message']['content']?.toString() ?? '';
+        String content =
+            data['choices']?[0]['message']['content']?.toString() ?? '';
 
         // Strip invisible unicode chars (zero-width space, BOM, etc.)
-        content = content.replaceAll(RegExp(r'[\u200B-\u200D\uFEFF\u00A0]'), '').trim();
+        content =
+            content
+                .replaceAll(RegExp(r'[\u200B-\u200D\uFEFF\u00A0]'), '')
+                .trim();
 
         if (content.isEmpty) {
           print('Contenu vide dans la réponse des mots-clés');
           return _extraireMotsClesLocalement(texte);
         }
 
-        content = content.replaceAll(RegExp(r'^```json\s*|\s*```$', multiLine: false), '');
+        content = content.replaceAll(
+          RegExp(r'^```json\s*|\s*```$', multiLine: false),
+          '',
+        );
 
         try {
           final motsClesParsed = jsonDecode(content);
           if (motsClesParsed.containsKey('mots_cles') &&
               motsClesParsed['mots_cles'] is List) {
-            List<String> extracted = List<String>.from(motsClesParsed['mots_cles']);
+            List<String> extracted = List<String>.from(
+              motsClesParsed['mots_cles'],
+            );
             if (extracted.length > 5) {
               return extracted.sublist(0, 5);
             } else if (extracted.length < 5) {
@@ -1006,7 +1236,9 @@ Texte à analyser : $texte'''
             return _extraireMotsClesLocalement(texte);
           }
         } catch (e) {
-          print('Erreur de parsing JSON pour mots-clés : $e, contenu : $content');
+          print(
+            'Erreur de parsing JSON pour mots-clés : $e, contenu : $content',
+          );
           // Fallback: extract top words directly from the original text
           return _extraireMotsClesLocalement(texte);
         }
@@ -1023,21 +1255,87 @@ Texte à analyser : $texte'''
   /// Fallback: extract the 5 most frequent meaningful words directly from [texte].
   List<String> _extraireMotsClesLocalement(String texte) {
     const stopWords = {
-      'je', 'tu', 'il', 'elle', 'nous', 'vous', 'ils', 'elles', 'me', 'te',
-      'se', 'le', 'la', 'les', 'un', 'une', 'des', 'du', 'de', 'et', 'ou',
-      'mais', 'donc', 'or', 'ni', 'car', 'que', 'qui', 'quoi', 'dont', 'où',
-      'est', 'sont', 'était', 'avec', 'dans', 'sur', 'pour', 'par', 'en',
-      'au', 'aux', 'ce', 'cet', 'cette', 'ces', 'mon', 'ton', 'son', 'ma',
-      'ta', 'sa', 'mes', 'tes', 'ses', 'pas', 'plus', 'très', 'bien', 'tout',
-      'aussi', 'si', 'ne', 'ai', 'as', 'a', 'our', 'été', 'avoir', 'être',
+      'je',
+      'tu',
+      'il',
+      'elle',
+      'nous',
+      'vous',
+      'ils',
+      'elles',
+      'me',
+      'te',
+      'se',
+      'le',
+      'la',
+      'les',
+      'un',
+      'une',
+      'des',
+      'du',
+      'de',
+      'et',
+      'ou',
+      'mais',
+      'donc',
+      'or',
+      'ni',
+      'car',
+      'que',
+      'qui',
+      'quoi',
+      'dont',
+      'où',
+      'est',
+      'sont',
+      'était',
+      'avec',
+      'dans',
+      'sur',
+      'pour',
+      'par',
+      'en',
+      'au',
+      'aux',
+      'ce',
+      'cet',
+      'cette',
+      'ces',
+      'mon',
+      'ton',
+      'son',
+      'ma',
+      'ta',
+      'sa',
+      'mes',
+      'tes',
+      'ses',
+      'pas',
+      'plus',
+      'très',
+      'bien',
+      'tout',
+      'aussi',
+      'si',
+      'ne',
+      'ai',
+      'as',
+      'a',
+      'our',
+      'été',
+      'avoir',
+      'être',
     };
     final freq = <String, int>{};
-    for (final word in texte.toLowerCase().split(RegExp(r'[^a-zàâäéèêëîïôùûüç]+'))) {
+    for (final word in texte.toLowerCase().split(
+      RegExp(r'[^a-zàâäéèêëîïôùûüç]+'),
+    )) {
       if (word.length >= 4 && !stopWords.contains(word)) {
         freq[word] = (freq[word] ?? 0) + 1;
       }
     }
-    final sorted = freq.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
+    final sorted =
+        freq.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
     final result = sorted.take(5).map((e) => e.key).toList();
     while (result.length < 5) result.add('mot${result.length + 1}');
     return result;
@@ -1054,19 +1352,19 @@ Texte à analyser : $texte'''
         return Theme(
           data: isDarkMode ? ThemeData.dark() : ThemeData.light(),
           child: Scaffold(
-            backgroundColor: isDarkMode
-                ? const Color(0xFF121212)
-                : Colors.grey.shade50,
+            backgroundColor:
+                isDarkMode ? const Color(0xFF121212) : Colors.grey.shade50,
             appBar: AppBar(
               title: Text(
                 _isRepublishing
                     ? 'Republier la journée'
-                    : (widget.journeeToEdit == null ? 'Nouvelle Journée' : 'Modifier la Journée'),
+                    : (widget.journeeToEdit == null
+                        ? 'Nouvelle Journée'
+                        : 'Modifier la Journée'),
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
-              backgroundColor: isDarkMode
-                  ? const Color(0xFF1E1E1E)
-                  : Colors.white,
+              backgroundColor:
+                  isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
               foregroundColor: isDarkMode ? Colors.white : Colors.black,
               elevation: 1,
               centerTitle: true,
@@ -1101,9 +1399,12 @@ Texte à analyser : $texte'''
   Widget _buildEditorCard(bool isDarkMode) {
     return Card(
       elevation: 2,
-      color: _isRepublishing
-          ? (isDarkMode ? Colors.grey.shade800.withOpacity(0.5) : Colors.grey.shade100.withOpacity(0.5))
-          : (isDarkMode ? const Color(0xFF1E1E1E) : Colors.white),
+      color:
+          _isRepublishing
+              ? (isDarkMode
+                  ? Colors.grey.shade800.withOpacity(0.5)
+                  : Colors.grey.shade100.withOpacity(0.5))
+              : (isDarkMode ? const Color(0xFF1E1E1E) : Colors.white),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Stack(
         children: [
@@ -1116,9 +1417,10 @@ Texte à analyser : $texte'''
                 controller: _controller,
                 focusNode: _focusNode,
                 config: quill.QuillEditorConfig(
-                  placeholder: _isRepublishing
-                      ? 'Texte original (non modifiable)'
-                      : 'Écrivez votre journée ici (minimum $_minTextLength caractères)...',
+                  placeholder:
+                      _isRepublishing
+                          ? 'Texte original (non modifiable)'
+                          : 'Écrivez votre journée ici (minimum $_minTextLength caractères)...',
                 ),
               ),
             ),
@@ -1165,17 +1467,37 @@ Texte à analyser : $texte'''
               imageWidget = FutureBuilder<Uint8List>(
                 future: item.readAsBytes(),
                 builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.done && snapshot.hasData) {
-                    return Image.memory(snapshot.data!, width: 110, height: 110, fit: BoxFit.cover);
+                  if (snapshot.connectionState == ConnectionState.done &&
+                      snapshot.hasData) {
+                    return Image.memory(
+                      snapshot.data!,
+                      width: 110,
+                      height: 110,
+                      fit: BoxFit.cover,
+                    );
                   }
-                  return const SizedBox(width: 110, height: 110, child: Center(child: CircularProgressIndicator()));
+                  return const SizedBox(
+                    width: 110,
+                    height: 110,
+                    child: Center(child: CircularProgressIndicator()),
+                  );
                 },
               );
             } else {
-              imageWidget = Image.file(File(item.path), width: 110, height: 110, fit: BoxFit.cover);
+              imageWidget = Image.file(
+                File(item.path),
+                width: 110,
+                height: 110,
+                fit: BoxFit.cover,
+              );
             }
           } else if (item is String) {
-            imageWidget = Image.network(item, width: 110, height: 110, fit: BoxFit.cover,);
+            imageWidget = Image.network(
+              item,
+              width: 110,
+              height: 110,
+              fit: BoxFit.cover,
+            );
           } else {
             imageWidget = const SizedBox.shrink();
           }
@@ -1185,13 +1507,23 @@ Texte à analyser : $texte'''
             child: Stack(
               alignment: Alignment.topRight,
               children: [
-                ClipRRect(borderRadius: BorderRadius.circular(12.0), child: imageWidget),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12.0),
+                  child: imageWidget,
+                ),
                 GestureDetector(
                   onTap: () => _removeImage(index),
                   child: Container(
                     margin: const EdgeInsets.all(4),
-                    decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
-                    child: const Icon(Icons.close, color: Colors.white, size: 18),
+                    decoration: const BoxDecoration(
+                      color: Colors.black54,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.close,
+                      color: Colors.white,
+                      size: 18,
+                    ),
                   ),
                 ),
               ],
@@ -1214,9 +1546,10 @@ Texte à analyser : $texte'''
             IconButton(
               onPressed: _isRepublishing ? null : _toggleListening,
               icon: Icon(_isListening ? Icons.mic : Icons.mic_none),
-              color: _isListening
-                  ? Colors.red
-                  : (isDarkMode ? Colors.white70 : Colors.grey.shade700),
+              color:
+                  _isListening
+                      ? Colors.red
+                      : (isDarkMode ? Colors.white70 : Colors.grey.shade700),
               tooltip: 'Dictée vocale',
             ),
             IconButton(
@@ -1226,19 +1559,22 @@ Texte à analyser : $texte'''
               tooltip: 'Ajouter une photo',
             ),
             IconButton(
-              onPressed: _isRepublishing ? null : () => _showFriendSelectionDialog(),
+              onPressed:
+                  _isRepublishing ? null : () => _showFriendSelectionDialog(),
               icon: const Icon(Icons.visibility_off_outlined),
-              color: _hasHiddenText
-                  ? Colors.red.shade700
-                  : (isDarkMode ? Colors.white70 : Colors.grey.shade700),
+              color:
+                  _hasHiddenText
+                      ? Colors.red.shade700
+                      : (isDarkMode ? Colors.white70 : Colors.grey.shade700),
               tooltip: 'Masquer du texte',
             ),
             IconButton(
               onPressed: _isRepublishing ? null : _showColorPickerDialog,
               icon: const Icon(Icons.palette_outlined),
-              color: _selectedCardColor != null 
-                  ? Colors.blue
-                  : (isDarkMode ? Colors.white70 : Colors.grey.shade700),
+              color:
+                  _selectedCardColor != null
+                      ? Colors.blue
+                      : (isDarkMode ? Colors.white70 : Colors.grey.shade700),
               tooltip: 'Couleur de la publication',
             ),
             const Spacer(),
@@ -1248,7 +1584,8 @@ Texte à analyser : $texte'''
             ),
             Switch(
               value: _estPublic,
-              onChanged: _togglePublicState, // <-- ON UTILISE LA NOUVELLE FONCTION ICI
+              onChanged:
+                  _togglePublicState, // <-- ON UTILISE LA NOUVELLE FONCTION ICI
               activeColor: Colors.blue,
             ),
           ],
@@ -1277,30 +1614,36 @@ Texte à analyser : $texte'''
             // Section Emojis
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: _emojis.map((emojiData) {
-                final isSelected = _selectedEmoji == emojiData['emoji'];
-                return GestureDetector(
-                  onTap: () {
-                    setState(() {
-                      if (_selectedEmoji == emojiData['emoji']) {
-                        _selectedEmoji = null;
-                      } else {
-                        _selectedEmoji = emojiData['emoji'];
-                      }
-                    });
-                  },
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                        color: isSelected
-                            ? Colors.blue.withOpacity(0.2)
-                            : Colors.transparent,
-                        shape: BoxShape.circle),
-                    child: Text(emojiData['emoji']!, style: TextStyle(fontSize: isSelected ? 34 : 30)),
-                  ),
-                );
-              }).toList(),
+              children:
+                  _emojis.map((emojiData) {
+                    final isSelected = _selectedEmoji == emojiData['emoji'];
+                    return GestureDetector(
+                      onTap: () {
+                        setState(() {
+                          if (_selectedEmoji == emojiData['emoji']) {
+                            _selectedEmoji = null;
+                          } else {
+                            _selectedEmoji = emojiData['emoji'];
+                          }
+                        });
+                      },
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color:
+                              isSelected
+                                  ? Colors.blue.withOpacity(0.2)
+                                  : Colors.transparent,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Text(
+                          emojiData['emoji']!,
+                          style: TextStyle(fontSize: isSelected ? 34 : 30),
+                        ),
+                      ),
+                    );
+                  }).toList(),
             ),
             const SizedBox(height: 16),
             _buildNoteManualSection(isDarkMode),
@@ -1358,16 +1701,23 @@ Texte à analyser : $texte'''
                     _manualProgress = 50.0;
                   });
                 },
-                child: const Text('Annuler', style: TextStyle(color: Colors.red)),
+                child: const Text(
+                  'Annuler',
+                  style: TextStyle(color: Colors.red),
+                ),
               ),
             ],
-          )
+          ),
         ],
       );
     } else {
       return OutlinedButton.icon(
         icon: const Icon(Icons.edit_note, size: 20),
-        label: Text(_manualNoteSelected ? 'Note Manuelle: ${_manualProgress.round()}/100' : "Note Manuelle"),
+        label: Text(
+          _manualNoteSelected
+              ? 'Note Manuelle: ${_manualProgress.round()}/100'
+              : "Note Manuelle",
+        ),
         onPressed: () {
           setState(() {
             _isEditingManualNote = true;
@@ -1385,7 +1735,11 @@ Texte à analyser : $texte'''
   }
 
   Widget _buildPostAsSouvenirSwitch(bool isDarkMode) {
-    final bool canPostAsSouvenir = (_controller.document.toPlainText().trim().isNotEmpty || _displayImages.isNotEmpty || _selectedEmoji != null || _manualNoteSelected);
+    final bool canPostAsSouvenir =
+        (_controller.document.toPlainText().trim().isNotEmpty ||
+            _displayImages.isNotEmpty ||
+            _selectedEmoji != null ||
+            _manualNoteSelected);
 
     return Card(
       elevation: 2,
@@ -1409,24 +1763,35 @@ Texte à analyser : $texte'''
           color: isDarkMode ? Colors.white70 : Colors.grey.shade700,
         ),
         value: _postAsSouvenir && canPostAsSouvenir,
-        onChanged: canPostAsSouvenir
-            ? (value) {
-          if (value && !_isVip) {
-            showVipPromotionPopup(context, "Poster en tant que souvenir");
-          } else {
-            setState(() => _postAsSouvenir = value);
-          }
-        }
-            : null,
-        subtitle: !canPostAsSouvenir
-            ? const Text("Écrivez, ajoutez une image, un emoji ou une note pour activer.", style: TextStyle(color: Colors.redAccent, fontSize: 12))
-            : Text(
-          "Option réservée aux membres VIP.",
-          style: TextStyle(
-            color: isDarkMode ? Colors.amber.shade300 : Colors.amber.shade900,
-            fontSize: 12,
-          ),
-        ),
+        onChanged:
+            canPostAsSouvenir
+                ? (value) {
+                  if (value && !_isVip) {
+                    showVipPromotionPopup(
+                      context,
+                      "Poster en tant que souvenir",
+                    );
+                  } else {
+                    setState(() => _postAsSouvenir = value);
+                  }
+                }
+                : null,
+        subtitle:
+            !canPostAsSouvenir
+                ? const Text(
+                  "Écrivez, ajoutez une image, un emoji ou une note pour activer.",
+                  style: TextStyle(color: Colors.redAccent, fontSize: 12),
+                )
+                : Text(
+                  "Option réservée aux membres VIP.",
+                  style: TextStyle(
+                    color:
+                        isDarkMode
+                            ? Colors.amber.shade300
+                            : Colors.amber.shade900,
+                    fontSize: 12,
+                  ),
+                ),
         activeColor: Colors.amber.shade700,
       ),
     );
@@ -1437,29 +1802,40 @@ Texte à analyser : $texte'''
       return const Center(child: CircularProgressIndicator());
     }
 
-    final bool hasTextInEditor = _controller.document.toPlainText().trim().isNotEmpty;
-    final bool hasEnoughTextForIA = hasTextInEditor && _controller.document.toPlainText().trim().length >= _minTextLength;
-    final bool hasAnyContent = hasTextInEditor || _displayImages.isNotEmpty || _selectedEmoji != null || _manualNoteSelected;
-
+    final bool hasTextInEditor =
+        _controller.document.toPlainText().trim().isNotEmpty;
+    final bool hasEnoughTextForIA =
+        hasTextInEditor &&
+        _controller.document.toPlainText().trim().length >= _minTextLength;
+    final bool hasAnyContent =
+        hasTextInEditor ||
+        _displayImages.isNotEmpty ||
+        _selectedEmoji != null ||
+        _manualNoteSelected;
 
     // CAS 1 : Une note manuelle a été sélectionnée par l'utilisateur.
     if (_manualNoteSelected) {
       return ElevatedButton(
-        onPressed: hasAnyContent ? () {
-          // Si le texte est suffisant pour l'IA, on lance l'analyse (mots-clés, etc.) mais sans générer de note IA.
-          // La fonction _enregistrerJournee utilisera la note manuelle (_manualProgress).
-          if (hasEnoughTextForIA) {
-            _analyserEtEnregistrer(false);
-          } else {
-            // S'il n'y a pas assez de texte (ou aucun texte), on enregistre directement sans analyse IA.
-            _enregistrerJournee();
-          }
-        } : null,
+        onPressed:
+            hasAnyContent
+                ? () {
+                  // Si le texte est suffisant pour l'IA, on lance l'analyse (mots-clés, etc.) mais sans générer de note IA.
+                  // La fonction _enregistrerJournee utilisera la note manuelle (_manualProgress).
+                  if (hasEnoughTextForIA) {
+                    _analyserEtEnregistrer(false);
+                  } else {
+                    // S'il n'y a pas assez de texte (ou aucun texte), on enregistre directement sans analyse IA.
+                    _enregistrerJournee();
+                  }
+                }
+                : null,
         style: ElevatedButton.styleFrom(
           padding: const EdgeInsets.symmetric(vertical: 16),
           backgroundColor: Colors.orange.shade700,
           foregroundColor: Colors.white,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
           textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
         ),
         child: const Text('Enregistrer sans note IA'),
@@ -1475,8 +1851,13 @@ Texte à analyser : $texte'''
             padding: const EdgeInsets.symmetric(vertical: 16),
             backgroundColor: Colors.green.shade700,
             foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            textStyle: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
           ),
           child: const Text('Analyser et noter avec IA'),
         );
@@ -1489,27 +1870,36 @@ Texte à analyser : $texte'''
             padding: const EdgeInsets.symmetric(vertical: 16),
             backgroundColor: Colors.blue.shade700,
             foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            textStyle: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
           ),
-          child: Text(hasTextInEditor ? 'Enregistrer (texte trop court pour IA)' : 'Enregistrer'),
+          child: Text(
+            hasTextInEditor
+                ? 'Enregistrer (texte trop court pour IA)'
+                : 'Enregistrer',
+          ),
         );
       }
     }
   }
-
 
   void _toggleHiddenTextVisibility(int textIndex) async {
     final hiddenDetail = _hiddenTextDetails[textIndex];
     final hiddenText = hiddenDetail['text'] as String? ?? '';
 
     // Charger la liste complète des amis
-    List<Map<String, dynamic>> friends = _allFriends.isNotEmpty
-        ? _allFriends
-        : await _getFriendsList();
+    List<Map<String, dynamic>> friends =
+        _allFriends.isNotEmpty ? _allFriends : await _getFriendsList();
     if (!mounted) return;
 
-    List<String> tempFriendIds = List<String>.from(hiddenDetail['friendIds'] as List? ?? []);
+    List<String> tempFriendIds = List<String>.from(
+      hiddenDetail['friendIds'] as List? ?? [],
+    );
 
     showDialog(
       context: context,
@@ -1518,10 +1908,15 @@ Texte à analyser : $texte'''
           builder: (context, setDialogState) {
             final isDarkMode = appBrightnessNotifier.value == Brightness.dark;
             return AlertDialog(
-              backgroundColor: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+              backgroundColor:
+                  isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
               title: Row(
                 children: [
-                  const Icon(Icons.visibility_off, color: Colors.orange, size: 20),
+                  const Icon(
+                    Icons.visibility_off,
+                    color: Colors.orange,
+                    size: 20,
+                  ),
                   const SizedBox(width: 8),
                   Text(
                     'Gérer le masquage',
@@ -1543,7 +1938,9 @@ Texte à analyser : $texte'''
                       decoration: BoxDecoration(
                         color: Colors.yellow.withOpacity(0.2),
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.yellow.withOpacity(0.5)),
+                        border: Border.all(
+                          color: Colors.yellow.withOpacity(0.5),
+                        ),
                       ),
                       child: Text(
                         '"$hiddenText"',
@@ -1565,7 +1962,12 @@ Texte à analyser : $texte'''
                     if (friends.isEmpty)
                       Text(
                         'Aucun ami trouvé.',
-                        style: TextStyle(color: isDarkMode ? Colors.white70 : Colors.grey.shade600),
+                        style: TextStyle(
+                          color:
+                              isDarkMode
+                                  ? Colors.white70
+                                  : Colors.grey.shade600,
+                        ),
                       )
                     else
                       ...friends.map((friend) {
@@ -1609,16 +2011,26 @@ Texte à analyser : $texte'''
                   },
                 ),
                 TextButton(
-                  child: Text('Annuler', style: TextStyle(color: isDarkMode ? Colors.white70 : Colors.grey)),
+                  child: Text(
+                    'Annuler',
+                    style: TextStyle(
+                      color: isDarkMode ? Colors.white70 : Colors.grey,
+                    ),
+                  ),
                   onPressed: () => Navigator.of(context).pop(),
                 ),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
-                  child: const Text('Confirmer', style: TextStyle(color: Colors.white)),
+                  child: const Text(
+                    'Confirmer',
+                    style: TextStyle(color: Colors.white),
+                  ),
                   onPressed: () {
                     if (tempFriendIds.isEmpty) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Sélectionnez au moins un ami')),
+                        const SnackBar(
+                          content: Text('Sélectionnez au moins un ami'),
+                        ),
                       );
                       return;
                     }
@@ -1630,8 +2042,11 @@ Texte à analyser : $texte'''
                       // Recalculer _selectedFriendIds
                       _selectedFriendIds.clear();
                       for (var detail in _hiddenTextDetails) {
-                        for (final id in List<String>.from(detail['friendIds'] as List? ?? [])) {
-                          if (!_selectedFriendIds.contains(id)) _selectedFriendIds.add(id);
+                        for (final id in List<String>.from(
+                          detail['friendIds'] as List? ?? [],
+                        )) {
+                          if (!_selectedFriendIds.contains(id))
+                            _selectedFriendIds.add(id);
                         }
                       }
                       _hasHiddenText = _hiddenTextDetails.isNotEmpty;
@@ -1686,21 +2101,27 @@ Texte à analyser : $texte'''
     if (currentUser == null) return [];
 
     try {
-      QuerySnapshot friendsSnapshot = await FirebaseFirestore.instance
-          .collection('friends')
-          .where('users', arrayContains: currentUser.uid)
-          .get();
+      QuerySnapshot friendsSnapshot =
+          await FirebaseFirestore.instance
+              .collection('friends')
+              .where('users', arrayContains: currentUser.uid)
+              .get();
 
-      List<Future<Map<String, dynamic>>> friendFutures = friendsSnapshot.docs.map((doc) async {
-        List<String> users = List<String>.from(doc['users']);
-        String friendId = users.firstWhere((id) => id != currentUser.uid);
-        DocumentSnapshot userDoc = await FirebaseFirestore.instance.collection('users').doc(friendId).get();
-        return {
-          'id': friendId,
-          'username': userDoc['username'] ?? 'Utilisateur inconnu',
-          'name': userDoc['name'] ?? '',
-        };
-      }).toList();
+      List<Future<Map<String, dynamic>>> friendFutures =
+          friendsSnapshot.docs.map((doc) async {
+            List<String> users = List<String>.from(doc['users']);
+            String friendId = users.firstWhere((id) => id != currentUser.uid);
+            DocumentSnapshot userDoc =
+                await FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(friendId)
+                    .get();
+            return {
+              'id': friendId,
+              'username': userDoc['username'] ?? 'Utilisateur inconnu',
+              'name': userDoc['name'] ?? '',
+            };
+          }).toList();
       return await Future.wait(friendFutures);
     } catch (e) {
       return [];
@@ -1734,12 +2155,18 @@ Texte à analyser : $texte'''
         selection != _previousSelection &&
         selection.isCollapsed) {
       final style = _controller.getSelectionStyle();
-      if (style.containsKey('background') && style.attributes['background']!.value == '#FFFF00') {
+      if (style.containsKey('background') &&
+          style.attributes['background']!.value == '#FFFF00') {
         // Find which hidden text detail matches the selected range
         final int? index = _hiddenTextDetails.indexWhere((detail) {
           final String targetText = detail['text'];
-          final int textStart = plainText.indexOf(targetText, selection.baseOffset - targetText.length);
-          return textStart != -1 && selection.baseOffset >= textStart && selection.baseOffset <= textStart + targetText.length;
+          final int textStart = plainText.indexOf(
+            targetText,
+            selection.baseOffset - targetText.length,
+          );
+          return textStart != -1 &&
+              selection.baseOffset >= textStart &&
+              selection.baseOffset <= textStart + targetText.length;
         });
         if (index != -1 && index != null) {
           _toggleHiddenTextVisibility(index);
@@ -1758,11 +2185,18 @@ Texte à analyser : $texte'''
         if (!textAfterAt.contains(' ')) {
           _currentMentionQuery = textAfterAt;
           setState(() {
-            _filteredFriends = _allFriends
-                .where((friend) =>
-            (friend['username']?.toLowerCase() ?? '').contains(_currentMentionQuery.toLowerCase()) ||
-                (friend['name']?.toLowerCase() ?? '').contains(_currentMentionQuery.toLowerCase()))
-                .toList();
+            _filteredFriends =
+                _allFriends
+                    .where(
+                      (friend) =>
+                          (friend['username']?.toLowerCase() ?? '').contains(
+                            _currentMentionQuery.toLowerCase(),
+                          ) ||
+                          (friend['name']?.toLowerCase() ?? '').contains(
+                            _currentMentionQuery.toLowerCase(),
+                          ),
+                    )
+                    .toList();
           });
           _showOverlay(); // Affiche l'overlay pour l'éditeur Quill
         } else {
@@ -1814,24 +2248,31 @@ Texte à analyser : $texte'''
     _removeOverlay();
   }
 
-  void _showFriendSelectionDialog({Map<String, dynamic>? existingDetail, int? indexToEdit}) async {
+  void _showFriendSelectionDialog({
+    Map<String, dynamic>? existingDetail,
+    int? indexToEdit,
+  }) async {
     final selection = _controller.selection;
     if (!selection.isValid || selection.isCollapsed) {
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Veuillez sélectionner du texte à masquer dans l\'éditeur'))
+        const SnackBar(
+          content: Text(
+            'Veuillez sélectionner du texte à masquer dans l\'éditeur',
+          ),
+        ),
       );
       return;
     }
 
     final selectedText = _controller.document.toPlainText().substring(
-        selection.baseOffset,
-        selection.extentOffset
+      selection.baseOffset,
+      selection.extentOffset,
     );
 
     if (selectedText.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('La sélection est vide'))
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('La sélection est vide')));
       return;
     }
 
@@ -1850,9 +2291,12 @@ Texte à analyser : $texte'''
           builder: (context, setDialogState) {
             final isDarkMode = appBrightnessNotifier.value == Brightness.dark;
             return AlertDialog(
-              backgroundColor: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+              backgroundColor:
+                  isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
               title: Text(
-                existingDetail != null ? 'Modifier les amis' : 'Sélectionner les amis',
+                existingDetail != null
+                    ? 'Modifier les amis'
+                    : 'Sélectionner les amis',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
@@ -1865,7 +2309,9 @@ Texte à analyser : $texte'''
                   children: [
                     Text(
                       'Texte masqué : "$selectedText"',
-                      style: TextStyle(color: isDarkMode ? Colors.white : Colors.black),
+                      style: TextStyle(
+                        color: isDarkMode ? Colors.white : Colors.black,
+                      ),
                     ),
                     const SizedBox(height: 16),
                     Text(
@@ -1878,79 +2324,104 @@ Texte à analyser : $texte'''
                     const SizedBox(height: 8),
                     ...friends.isEmpty
                         ? [
-                      Text(
-                        'Aucun ami trouvé.',
-                        style: TextStyle(color: isDarkMode ? Colors.white70 : Colors.grey.shade700),
-                      )
-                    ]
+                          Text(
+                            'Aucun ami trouvé.',
+                            style: TextStyle(
+                              color:
+                                  isDarkMode
+                                      ? Colors.white70
+                                      : Colors.grey.shade700,
+                            ),
+                          ),
+                        ]
                         : friends.map((friend) {
-                      return CheckboxListTile(
-                        title: Text(
-                          friend['username'] ?? 'Sans nom',
-                          style: TextStyle(color: isDarkMode ? Colors.white : Colors.black),
-                        ),
-                        subtitle: friend['name']?.isNotEmpty == true
-                            ? Text(
-                          friend['name'],
-                          style: TextStyle(color: isDarkMode ? Colors.white70 : Colors.grey.shade700),
-                        )
-                            : null,
-                        value: tempSelectedFriendIds.contains(friend['id']),
-                        onChanged: (bool? value) {
-                          setDialogState(() {
-                            if (value == true) {
-                              tempSelectedFriendIds.add(friend['id']);
-                            } else {
-                              tempSelectedFriendIds.remove(friend['id']);
-                            }
-                          });
-                        },
-                        activeColor: Colors.blue,
-                        checkColor: Colors.white,
-                      );
-                    }).toList(),
+                          return CheckboxListTile(
+                            title: Text(
+                              friend['username'] ?? 'Sans nom',
+                              style: TextStyle(
+                                color: isDarkMode ? Colors.white : Colors.black,
+                              ),
+                            ),
+                            subtitle:
+                                friend['name']?.isNotEmpty == true
+                                    ? Text(
+                                      friend['name'],
+                                      style: TextStyle(
+                                        color:
+                                            isDarkMode
+                                                ? Colors.white70
+                                                : Colors.grey.shade700,
+                                      ),
+                                    )
+                                    : null,
+                            value: tempSelectedFriendIds.contains(friend['id']),
+                            onChanged: (bool? value) {
+                              setDialogState(() {
+                                if (value == true) {
+                                  tempSelectedFriendIds.add(friend['id']);
+                                } else {
+                                  tempSelectedFriendIds.remove(friend['id']);
+                                }
+                              });
+                            },
+                            activeColor: Colors.blue,
+                            checkColor: Colors.white,
+                          );
+                        }).toList(),
                   ],
                 ),
               ),
               actions: [
                 TextButton(
-                  child: const Text('Annuler', style: TextStyle(color: Colors.red)),
+                  child: const Text(
+                    'Annuler',
+                    style: TextStyle(color: Colors.red),
+                  ),
                   onPressed: () => Navigator.of(context).pop(),
                 ),
                 ElevatedButton(
-                  child: const Text('Confirmer', style: TextStyle(color: Colors.white)),
+                  child: const Text(
+                    'Confirmer',
+                    style: TextStyle(color: Colors.white),
+                  ),
                   onPressed: () {
                     if (tempSelectedFriendIds.isEmpty) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Veuillez sélectionner au moins un ami'))
+                        const SnackBar(
+                          content: Text(
+                            'Veuillez sélectionner au moins un ami',
+                          ),
+                        ),
                       );
                       return;
                     }
 
                     _controller.formatSelection(
-                        quill.Attribute.fromKeyValue('background', '#FFFF00')
+                      quill.Attribute.fromKeyValue('background', '#FFFF00'),
                     );
                     // Texte noir sur fond jaune pour être lisible
                     _controller.formatSelection(
-                        quill.Attribute.fromKeyValue('color', '#000000')
+                      quill.Attribute.fromKeyValue('color', '#000000'),
                     );
 
                     setState(() {
                       if (indexToEdit != null) {
                         _hiddenTextDetails[indexToEdit] = {
                           'friendIds': List<String>.from(tempSelectedFriendIds),
-                          'text': selectedText.trim()
+                          'text': selectedText.trim(),
                         };
                       } else {
                         _hiddenTextDetails.add({
                           'friendIds': List<String>.from(tempSelectedFriendIds),
-                          'text': selectedText.trim()
+                          'text': selectedText.trim(),
                         });
                       }
 
                       _selectedFriendIds.clear();
                       for (var detail in _hiddenTextDetails) {
-                        List<String> friendIds = List<String>.from(detail['friendIds']);
+                        List<String> friendIds = List<String>.from(
+                          detail['friendIds'],
+                        );
                         for (String friendId in friendIds) {
                           if (!_selectedFriendIds.contains(friendId)) {
                             _selectedFriendIds.add(friendId);
@@ -1962,9 +2433,7 @@ Texte à analyser : $texte'''
 
                     Navigator.of(context).pop();
                   },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue,
-                  ),
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
                 ),
               ],
             );
@@ -1974,54 +2443,83 @@ Texte à analyser : $texte'''
     );
   }
 
-  void _showOverlay({bool isForCommentField = false}) { // isForCommentField n'est plus utilisé
+  void _showOverlay() {
     if (_overlayEntry != null) _removeOverlay();
     if (_filteredFriends.isEmpty) return;
 
     OverlayState? overlayState = Overlay.of(context);
 
-    final RenderBox? editorRenderBox = _focusNode.context?.findRenderObject() as RenderBox?;
+    final RenderBox? editorRenderBox =
+        _focusNode.context?.findRenderObject() as RenderBox?;
     if (editorRenderBox == null) return;
 
     final Offset editorOffset = editorRenderBox.localToGlobal(Offset.zero);
 
     _overlayEntry = OverlayEntry(
-      builder: (context) => ValueListenableBuilder<Brightness>(
-        valueListenable: appBrightnessNotifier,
-        builder: (context, brightness, child) {
-          final isDarkMode = brightness == Brightness.dark;
-          return Positioned(
-            top: editorOffset.dy + editorRenderBox.size.height + 8,
-            left: editorOffset.dx + 16,
-            width: editorRenderBox.size.width - 32,
-            child: Material(
-              elevation: 8.0,
-              borderRadius: BorderRadius.circular(8),
-              color: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 200),
-                child: ListView.builder(
-                  padding: EdgeInsets.zero,
-                  shrinkWrap: true,
-                  itemCount: _filteredFriends.length,
-                  itemBuilder: (context, index) {
-                    final friend = _filteredFriends[index];
-                    return ListTile(
-                      leading: CircleAvatar(
-                        backgroundColor: Colors.blue,
-                        child: Text((friend['username']?.substring(0, 1) ?? 'U').toUpperCase(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                      ),
-                      title: Text(friend['username'] ?? 'Inconnu', style: TextStyle(color: isDarkMode ? Colors.white : Colors.black)),
-                      subtitle: friend['name']?.isNotEmpty == true ? Text(friend['name'], style: TextStyle(color: isDarkMode ? Colors.white70 : Colors.grey.shade700)) : null,
-                      onTap: () => _insertMentionInQuill(friend['username'] ?? 'Inconnu', friend['id']),
-                    );
-                  },
+      builder:
+          (context) => ValueListenableBuilder<Brightness>(
+            valueListenable: appBrightnessNotifier,
+            builder: (context, brightness, child) {
+              final isDarkMode = brightness == Brightness.dark;
+              return Positioned(
+                top: editorOffset.dy + editorRenderBox.size.height + 8,
+                left: editorOffset.dx + 16,
+                width: editorRenderBox.size.width - 32,
+                child: Material(
+                  elevation: 8.0,
+                  borderRadius: BorderRadius.circular(8),
+                  color: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 200),
+                    child: ListView.builder(
+                      padding: EdgeInsets.zero,
+                      shrinkWrap: true,
+                      itemCount: _filteredFriends.length,
+                      itemBuilder: (context, index) {
+                        final friend = _filteredFriends[index];
+                        return ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor: Colors.blue,
+                            child: Text(
+                              (friend['username']?.substring(0, 1) ?? 'U')
+                                  .toUpperCase(),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          title: Text(
+                            friend['username'] ?? 'Inconnu',
+                            style: TextStyle(
+                              color: isDarkMode ? Colors.white : Colors.black,
+                            ),
+                          ),
+                          subtitle:
+                              friend['name']?.isNotEmpty == true
+                                  ? Text(
+                                    friend['name'],
+                                    style: TextStyle(
+                                      color:
+                                          isDarkMode
+                                              ? Colors.white70
+                                              : Colors.grey.shade700,
+                                    ),
+                                  )
+                                  : null,
+                          onTap:
+                              () => _insertMentionInQuill(
+                                friend['username'] ?? 'Inconnu',
+                                friend['id'],
+                              ),
+                        );
+                      },
+                    ),
+                  ),
                 ),
-              ),
-            ),
-          );
-        },
-      ),
+              );
+            },
+          ),
     );
     overlayState.insert(_overlayEntry!);
   }
@@ -2034,28 +2532,40 @@ Texte à analyser : $texte'''
   Future<bool> _obtenirNote(String currentText) async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     String iaPreference = prefs.getString('iaPreference') ?? 'ressenti';
-    String prompt = iaPreference == 'ressenti'
-        ? 'Analyse ce texte et donne une note sur 100 basée sur le ressenti. Réponds uniquement avec un nombre entier suivi de "/100". Texte : $currentText'
-        : 'Analyse ce texte et donne une note sur 100 basée sur la qualité de la journée. Réponds uniquement avec un nombre entier suivi de "/100". Texte : $currentText';
+    String prompt =
+        iaPreference == 'ressenti'
+            ? 'Analyse ce texte et donne une note sur 100 basée sur le ressenti. Réponds uniquement avec un nombre entier suivi de "/100". Texte : $currentText'
+            : 'Analyse ce texte et donne une note sur 100 basée sur la qualité de la journée. Réponds uniquement avec un nombre entier suivi de "/100". Texte : $currentText';
 
     const url = 'https://api.deepinfra.com/v1/openai/chat/completions';
     try {
-      final response = await http.post(Uri.parse(url),
-          headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $DEEPSEEK_API_KEY'},
-          body: jsonEncode({
-            'model': await resolveAiModel(),
-            'messages': [{'role': 'user', 'content': prompt}],
-            'max_tokens': 50
-          }));
+      final response = await http.post(
+        Uri.parse(url),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $DEEPSEEK_API_KEY',
+        },
+        body: jsonEncode({
+          'model': await resolveAiModel(),
+          'messages': [
+            {'role': 'user', 'content': prompt},
+          ],
+          'max_tokens': 50,
+        }),
+      );
 
       if (response.statusCode == 200) {
         final data = jsonDecode(utf8.decode(response.bodyBytes));
-        final noteText = data['choices'][0]['message']['content']?.toString() ?? '';
+        final noteText =
+            data['choices'][0]['message']['content']?.toString() ?? '';
         final standardMatch = RegExp(r'(\d+)/100').firstMatch(noteText);
 
-        int? parsedNote = standardMatch != null
-            ? int.tryParse(standardMatch.group(1)!)
-            : int.tryParse(RegExp(r'(\d+)').firstMatch(noteText)?.group(1) ?? '');
+        int? parsedNote =
+            standardMatch != null
+                ? int.tryParse(standardMatch.group(1)!)
+                : int.tryParse(
+                  RegExp(r'(\d+)').firstMatch(noteText)?.group(1) ?? '',
+                );
 
         if (parsedNote != null) {
           setState(() {
@@ -2063,17 +2573,29 @@ Texte à analyser : $texte'''
             _manualNoteSelected = false;
             _isEditingManualNote = false;
           });
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Note IA obtenue : $_note/100'), backgroundColor: Colors.green));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Note IA obtenue : $_note/100'),
+              backgroundColor: Colors.green,
+            ),
+          );
           return true;
         } else {
           throw Exception("Format de note non reconnu par l'IA");
         }
       } else {
-        throw Exception('Erreur API DeepSeek lors de l\'obtention de la note: ${response.statusCode}');
+        throw Exception(
+          'Erreur API DeepSeek lors de l\'obtention de la note: ${response.statusCode}',
+        );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erreur d\'obtention de la note: $e'), backgroundColor: Colors.red));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erreur d\'obtention de la note: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
       return false;
     }
@@ -2081,7 +2603,11 @@ Texte à analyser : $texte'''
 
   Future<String?> _getUsernameById(String userId) async {
     try {
-      DocumentSnapshot userDoc = await FirebaseFirestore.instance.collection('users').doc(userId).get();
+      DocumentSnapshot userDoc =
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(userId)
+              .get();
       if (userDoc.exists) {
         return (userDoc.data() as Map<String, dynamic>)['username'];
       }

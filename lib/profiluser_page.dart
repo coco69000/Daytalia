@@ -82,7 +82,7 @@ class _ProfileUserPageState extends State<ProfileUserPage> {
   bool _isDarkMode = false;
   bool _profileCardBlurEnabled = false;
 
-  // --- DÉBUT : NOUVELLES VARIABLES D'ÉTAT POUR LES LIKES ---
+  // --- DÉBUT : VARIABLES D'ÉTAT POUR LES LIKES ---
   final Random _random = Random();
   int _likeCount = 0;
   Offset _heartPosition = const Offset(50, 150);
@@ -92,13 +92,13 @@ class _ProfileUserPageState extends State<ProfileUserPage> {
   bool _likesBlocked = false;
   Color _heartColor = Colors.red;
   double _heartSize = 40.0;
-  // --- FIN : NOUVELLES VARIABLES D'ÉTAT POUR LES LIKES ---
+  // --- FIN : VARIABLES D'ÉTAT POUR LES LIKES ---
 
-  // --- DÉBUT : NOUVELLES VARIABLES POUR LES AMIS ---
+  // --- DÉBUT : VARIABLES POUR LES AMIS ---
   int _friendCount = 0;
   int _mutualFriendsCount = 0;
   List<String> _currentUserFriends = [];
-  // --- FIN : NOUVELLES VARIABLES POUR LES AMIS ---
+  // --- FIN : VARIABLES POUR LES AMIS ---
 
   @override
   void initState() {
@@ -167,7 +167,7 @@ class _ProfileUserPageState extends State<ProfileUserPage> {
       }
       final data = userDataDoc.data() as Map<String, dynamic>;
 
-      // --- DÉBUT : CHARGEMENT DES DONNÉES D'AMIS ---
+      // --- CHARGEMENT DES DONNÉES D'AMIS ---
       final List<String> profileUserFriends = List<String>.from(
         data['friends'] ?? [],
       );
@@ -182,7 +182,6 @@ class _ProfileUserPageState extends State<ProfileUserPage> {
           profileUserFriends
               .where((friendId) => _currentUserFriends.contains(friendId))
               .toSet();
-      // --- FIN : CHARGEMENT DES DONNÉES D'AMIS ---
 
       final now = DateTime.now();
       final startOfToday = DateTime(now.year, now.month, now.day);
@@ -219,11 +218,10 @@ class _ProfileUserPageState extends State<ProfileUserPage> {
         _pinnedJourneesState = List.generate(
           pinCount,
           (index) => PinnedItemState(
-            data:
-                index < pinnedJourneesRaw.length &&
-                        pinnedJourneesRaw[index] != null
-                    ? Map<String, dynamic>.from(pinnedJourneesRaw[index])
-                    : {},
+            data: index < pinnedJourneesRaw.length &&
+                    pinnedJourneesRaw[index] != null
+                ? Map<String, dynamic>.from(pinnedJourneesRaw[index])
+                : {},
             originalIndex: index,
           ),
         );
@@ -232,11 +230,10 @@ class _ProfileUserPageState extends State<ProfileUserPage> {
         _pinnedSouvenirsState = List.generate(
           pinCount,
           (index) => PinnedItemState(
-            data:
-                index < pinnedSouvenirsRaw.length &&
-                        pinnedSouvenirsRaw[index] != null
-                    ? Map<String, dynamic>.from(pinnedSouvenirsRaw[index])
-                    : {},
+            data: index < pinnedSouvenirsRaw.length &&
+                    pinnedSouvenirsRaw[index] != null
+                ? Map<String, dynamic>.from(pinnedSouvenirsRaw[index])
+                : {},
             originalIndex: index,
           ),
         );
@@ -274,8 +271,6 @@ class _ProfileUserPageState extends State<ProfileUserPage> {
       rethrow;
     }
   }
-
-  // --- DÉBUT : NOUVELLES FONCTIONS POUR LES LIKES ---
 
   void _giveLike() {
     if (_likesBlocked || widget.userId == currentUser?.uid) return;
@@ -465,7 +460,6 @@ class _ProfileUserPageState extends State<ProfileUserPage> {
       }
     }
   }
-  // --- FIN : NOUVELLES FONCTIONS POUR LES LIKES ---
 
   void _sendSouvenirToBack(Souvenir souvenir) {
     if (_souvenirZOrders.isEmpty) return;
@@ -527,160 +521,200 @@ class _ProfileUserPageState extends State<ProfileUserPage> {
 
   // --- DEBUT DES FONCTIONS POUR LE POP-UP ---
 
-  String _getImagePath(String design, String color) {
-    return 'assets/${design}_${color}.png';
+  double _calculateFontSize(String text) {
+    if (text.length < 50) return 18.0;
+    if (text.length < 100) return 16.0;
+    if (text.length < 200) return 15.0;
+    return 14.0;
   }
 
-  Color _getQualiteColor(String qualite) {
-    switch (qualite) {
-      case 'incroyable':
-        return Colors.amber;
-      case 'bonne':
-        return Colors.green;
-      case 'normale':
-        return Colors.blue;
-      case 'difficile':
-        return Colors.orange;
-      case 'horrible':
-        return Colors.red;
-      default:
-        return Colors.grey;
-    }
+  Color _getQualiteColor(String qualiteStr) {
+    String q = qualiteStr.toLowerCase();
+    if (q.contains('nostalgie')) return Colors.purple;
+    if (q.contains('jamais') || q.contains('oublie')) return Colors.blue;
+    if (q.contains('bonheur')) return Colors.green;
+    return Colors.grey;
   }
 
-  String _getQualiteLabel(String qualite) {
-    if (qualite.isEmpty) return 'N/A';
-    return qualite[0].toUpperCase() + qualite.substring(1);
+  String _getQualiteLabel(String qualiteStr) {
+    String q = qualiteStr.toLowerCase();
+    if (q.contains('nostalgie')) return 'Nostalgie';
+    if (q.contains('jamais') || q.contains('oublie')) return 'Jamais Oublié';
+    if (q.contains('bonheur')) return 'Bonheur';
+    return 'Souvenir';
   }
 
-  void _showPopupCardSouvenir(
-    BuildContext context,
-    SouvenirModel souvenir,
-    String design,
-    String color,
-  ) {
+  IconData _getQualiteIcon(String qualiteStr) {
+    String q = qualiteStr.toLowerCase();
+    if (q.contains('nostalgie')) return Icons.history;
+    if (q.contains('jamais') || q.contains('oublie')) return Icons.favorite;
+    if (q.contains('bonheur')) return Icons.wb_sunny_rounded;
+    return Icons.star;
+  }
+
+  // POPUP JOURNÉE
+  void _showJourneeDetailDialog(JourneeModel journee) {
+    final isDark = _isDarkMode;
+
     showGeneralDialog(
       context: context,
       barrierDismissible: true,
-      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
-      barrierColor: Colors.black54,
-      transitionDuration: const Duration(milliseconds: 300),
-      pageBuilder: (context, animation, secondaryAnimation) {
-        final bool isSpecialShape = [
-          'coeur',
-          'etoile',
-          'rond',
-        ].contains(design);
-        final double paddingValue = isSpecialShape ? 50.0 : 40.0;
-        final String qualiteAsString = souvenir.qualite.name;
-
-        return GestureDetector(
-          onTap: () => Navigator.of(context).pop(),
+      barrierLabel: '',
+      barrierColor: Colors.transparent,
+      transitionDuration: const Duration(milliseconds: 280),
+      transitionBuilder: (ctx, anim1, anim2, child) {
+        return FadeTransition(
+          opacity: CurvedAnimation(parent: anim1, curve: Curves.easeOut),
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.90, end: 1.0).animate(
+              CurvedAnimation(parent: anim1, curve: Curves.easeOutBack),
+            ),
+            child: child,
+          ),
+        );
+      },
+      pageBuilder: (ctx, anim1, anim2) {
+        return BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 14.0, sigmaY: 14.0),
           child: Material(
-            color: Colors.transparent,
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
-              child: Center(
-                child: ScaleTransition(
-                  scale: CurvedAnimation(
-                    parent: animation,
-                    curve: Curves.easeOutBack,
-                  ),
-                  child: GestureDetector(
-                    onTap:
-                        () {}, // Empêche la propagation du tap vers le parent
-                    child: SizedBox(
-                      width: MediaQuery.of(context).size.width * 0.65,
-                      height: MediaQuery.of(context).size.width * 0.65,
-                      child: Stack(
-                        alignment: Alignment.center,
+            color: Colors.black.withValues(alpha: 0.55),
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 24,
+                ),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight: MediaQuery.of(context).size.height * 0.85,
+                      maxWidth: MediaQuery.of(context).size.width,
+                    ),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.grey.shade900 : Colors.white,
+                        borderRadius: BorderRadius.circular(24),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Colors.black38,
+                            blurRadius: 24,
+                            spreadRadius: 2,
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Positioned.fill(
-                            child: Image.asset(
-                              _getImagePath(design, color),
-                              fit: BoxFit.contain,
-                              errorBuilder:
-                                  (context, error, stackTrace) => Container(
-                                    color: Colors.white,
-                                    child: const Icon(
-                                      Icons.broken_image,
-                                      color: Colors.grey,
+                          // ── Header ──
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 16, 8, 0),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    '${journee.date.day.toString().padLeft(2, '0')}/'
+                                    '${journee.date.month.toString().padLeft(2, '0')}/'
+                                    '${journee.date.year}',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: isDark ? Colors.white : Colors.black87,
                                     ),
                                   ),
+                                ),
+                                IconButton(
+                                  icon: Icon(
+                                    Icons.close,
+                                    color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+                                  ),
+                                  onPressed: () => Navigator.of(ctx).pop(),
+                                ),
+                              ],
                             ),
                           ),
-                          Padding(
-                            padding: EdgeInsets.all(paddingValue),
+                          // ── Content ──
+                          Flexible(
                             child: SingleChildScrollView(
+                              padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
                               child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                crossAxisAlignment: CrossAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  if (souvenir.isRepost)
+                                  if (journee.emoji != null) ...[
                                     Text(
-                                      'Republié de ${souvenir.repostedFromUserName ?? 'un ami'}',
-                                      style: const TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.white70,
-                                      ),
-                                      textAlign: TextAlign.center,
+                                      journee.emoji!,
+                                      style: const TextStyle(fontSize: 36),
                                     ),
+                                    const SizedBox(height: 8),
+                                  ],
                                   Text(
-                                    souvenir.texte,
-                                    textAlign: TextAlign.center,
-                                    style: const TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.white,
-                                      shadows: <Shadow>[
-                                        Shadow(
-                                          offset: Offset(1.5, 1.5),
-                                          blurRadius: 3.0,
-                                          color: Colors.black87,
+                                    journee.texte1 ?? '',
+                                    style: TextStyle(
+                                      fontSize: _calculateFontSize(journee.texte1 ?? ''),
+                                      height: 1.65,
+                                      color: isDark ? Colors.grey.shade100 : Colors.black87,
+                                    ),
+                                  ),
+                                  if (journee.note != null) ...[
+                                    const SizedBox(height: 14),
+                                    Row(
+                                      children: [
+                                        const Icon(
+                                          Icons.star_rounded,
+                                          color: Colors.amber,
+                                          size: 20,
                                         ),
-                                        Shadow(
-                                          offset: Offset(-1.5, -1.5),
-                                          blurRadius: 3.0,
-                                          color: Colors.black87,
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          'Note : ${journee.note}',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.blueGrey.shade700,
+                                          ),
                                         ),
                                       ],
                                     ),
-                                  ),
-                                  if (souvenir.photoUrls.isNotEmpty) ...[
-                                    const SizedBox(height: 12),
-                                    ClipRRect(
-                                      borderRadius: BorderRadius.circular(10),
-                                      child: Image.network(
-                                        souvenir.photoUrls.first,
-                                        height: 100,
-                                        width: double.infinity,
-                                        fit: BoxFit.cover,
+                                  ],
+                                  if (journee.photoUrls.isNotEmpty) ...[
+                                    const SizedBox(height: 14),
+                                    SizedBox(
+                                      height: 120,
+                                      child: ListView.builder(
+                                        scrollDirection: Axis.horizontal,
+                                        itemCount: journee.photoUrls.length,
+                                        itemBuilder: (_, i) => Padding(
+                                          padding: const EdgeInsets.only(right: 8),
+                                          child: ClipRRect(
+                                            borderRadius: BorderRadius.circular(12),
+                                            child: Image.network(
+                                              journee.photoUrls[i],
+                                              width: 120,
+                                              height: 120,
+                                              fit: BoxFit.cover,
+                                            ),
+                                          ),
+                                        ),
                                       ),
                                     ),
                                   ],
-                                  const SizedBox(height: 12),
-                                  Chip(
-                                    label: Text(
-                                      'Qualité: ${_getQualiteLabel(qualiteAsString)}',
-                                      style: TextStyle(
-                                        color: _getQualiteColor(
-                                          qualiteAsString,
-                                        ),
-                                        fontWeight: FontWeight.w600,
-                                      ),
+                                  if ((journee.motsCles ?? []).isNotEmpty) ...[
+                                    const SizedBox(height: 14),
+                                    Wrap(
+                                      spacing: 6,
+                                      runSpacing: 4,
+                                      children: (journee.motsCles ?? [])
+                                          .map(
+                                            (k) => Chip(
+                                              label: Text(
+                                                k,
+                                                style: const TextStyle(fontSize: 11),
+                                              ),
+                                              visualDensity: VisualDensity.compact,
+                                              padding: EdgeInsets.zero,
+                                            ),
+                                          )
+                                          .toList(),
                                     ),
-                                    backgroundColor: _getQualiteColor(
-                                      qualiteAsString,
-                                    ).withOpacity(0.15),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    'Note: ${souvenir.noteQualite}/100',
-                                    style: const TextStyle(
-                                      fontSize: 16,
-                                      color: Colors.black87,
-                                    ),
-                                  ),
+                                  ],
                                 ],
                               ),
                             ),
@@ -698,117 +732,147 @@ class _ProfileUserPageState extends State<ProfileUserPage> {
     );
   }
 
-  void _showPopupCardJournee(
-    BuildContext context,
-    JourneeModel journee,
-    String design,
-    String color,
-  ) {
+  // POPUP SOUVENIR
+  void _showSouvenirDetailDialog(SouvenirModel souvenir) {
+    final isDark = _isDarkMode;
+    final String qualiteStr = souvenir.qualite.toString();
+
+    final Color badgeColor = _getQualiteColor(qualiteStr);
+    final String badgeLabel = _getQualiteLabel(qualiteStr);
+    final IconData badgeIcon = _getQualiteIcon(qualiteStr);
+
     showGeneralDialog(
       context: context,
       barrierDismissible: true,
-      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
-      barrierColor: Colors.black54,
-      transitionDuration: const Duration(milliseconds: 300),
-      pageBuilder: (context, animation, secondaryAnimation) {
-        final bool isSpecialShape = [
-          'coeur',
-          'etoile',
-          'rond',
-        ].contains(design);
-        final double paddingValue = isSpecialShape ? 50.0 : 40.0;
-
-        return GestureDetector(
-          onTap: () => Navigator.of(context).pop(),
+      barrierLabel: '',
+      barrierColor: Colors.transparent,
+      transitionDuration: const Duration(milliseconds: 280),
+      transitionBuilder: (ctx, anim1, anim2, child) {
+        return FadeTransition(
+          opacity: CurvedAnimation(parent: anim1, curve: Curves.easeOut),
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.90, end: 1.0).animate(
+              CurvedAnimation(parent: anim1, curve: Curves.easeOutBack),
+            ),
+            child: child,
+          ),
+        );
+      },
+      pageBuilder: (ctx, anim1, anim2) {
+        return BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 14.0, sigmaY: 14.0),
           child: Material(
-            color: Colors.transparent,
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
-              child: Center(
-                child: ScaleTransition(
-                  scale: CurvedAnimation(
-                    parent: animation,
-                    curve: Curves.easeOutBack,
-                  ),
-                  child: GestureDetector(
-                    onTap:
-                        () {}, // Empêche la propagation du tap vers le parent
-                    child: SizedBox(
-                      width: MediaQuery.of(context).size.width * 0.65,
-                      height: MediaQuery.of(context).size.width * 0.65,
-                      child: Stack(
-                        alignment: Alignment.center,
+            color: Colors.black.withValues(alpha: 0.55),
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 24,
+                ),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight: MediaQuery.of(context).size.height * 0.85,
+                      maxWidth: MediaQuery.of(context).size.width,
+                    ),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.grey.shade900 : Colors.white,
+                        borderRadius: BorderRadius.circular(24),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Colors.black38,
+                            blurRadius: 24,
+                            spreadRadius: 2,
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Positioned.fill(
-                            child: Image.asset(
-                              _getImagePath(design, color),
-                              fit: BoxFit.contain,
-                              errorBuilder:
-                                  (context, error, stackTrace) => Container(
-                                    color: Colors.white,
-                                    child: const Icon(
-                                      Icons.broken_image,
-                                      color: Colors.grey,
+                          // ── Header ──
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 16, 8, 0),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    '${souvenir.date.day.toString().padLeft(2, '0')}'
+                                    '/${souvenir.date.month.toString().padLeft(2, '0')}'
+                                    '/${souvenir.date.year}',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: isDark ? Colors.white : Colors.black87,
                                     ),
                                   ),
+                                ),
+                                IconButton(
+                                  icon: Icon(
+                                    Icons.close,
+                                    color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+                                  ),
+                                  onPressed: () => Navigator.of(ctx).pop(),
+                                ),
+                              ],
                             ),
                           ),
-                          Padding(
-                            padding: EdgeInsets.all(paddingValue),
+                          // ── Content ──
+                          Flexible(
                             child: SingleChildScrollView(
+                              padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
                               child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                crossAxisAlignment: CrossAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(
-                                    journee.emoji ?? '🤔',
-                                    style: const TextStyle(fontSize: 40),
+                                  // Qualité badge
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        badgeIcon,
+                                        color: badgeColor,
+                                        size: 20,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        badgeLabel,
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          color: badgeColor,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                   const SizedBox(height: 10),
                                   Text(
-                                    journee.texte1 ?? 'Aucun texte',
-                                    textAlign: TextAlign.center,
-                                    style: const TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.white,
-                                      shadows: <Shadow>[
-                                        Shadow(
-                                          offset: Offset(1.5, 1.5),
-                                          blurRadius: 3.0,
-                                          color: Colors.black87,
-                                        ),
-                                        Shadow(
-                                          offset: Offset(-1.5, -1.5),
-                                          blurRadius: 3.0,
-                                          color: Colors.black87,
-                                        ),
-                                      ],
+                                    souvenir.texte,
+                                    style: TextStyle(
+                                      fontSize: _calculateFontSize(souvenir.texte),
+                                      height: 1.65,
+                                      color: isDark ? Colors.grey.shade100 : Colors.black87,
                                     ),
                                   ),
-                                  const SizedBox(height: 12),
-                                  Chip(
-                                    label: Text(
-                                      'Qualité: ${_getQualiteLabel(journee.qualite)}',
-                                      style: TextStyle(
-                                        color: _getQualiteColor(
-                                          journee.qualite,
+                                  if (souvenir.photoUrls.isNotEmpty) ...[
+                                    const SizedBox(height: 14),
+                                    SizedBox(
+                                      height: 120,
+                                      child: ListView.builder(
+                                        scrollDirection: Axis.horizontal,
+                                        itemCount: souvenir.photoUrls.length,
+                                        itemBuilder: (_, i) => Padding(
+                                          padding: const EdgeInsets.only(right: 8),
+                                          child: ClipRRect(
+                                            borderRadius: BorderRadius.circular(12),
+                                            child: Image.network(
+                                              souvenir.photoUrls[i],
+                                              width: 120,
+                                              height: 120,
+                                              fit: BoxFit.cover,
+                                            ),
+                                          ),
                                         ),
-                                        fontWeight: FontWeight.w600,
                                       ),
                                     ),
-                                    backgroundColor: _getQualiteColor(
-                                      journee.qualite,
-                                    ).withOpacity(0.15),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    'Note: ${journee.note}/100',
-                                    style: const TextStyle(
-                                      fontSize: 16,
-                                      color: Colors.black87,
-                                    ),
-                                  ),
+                                  ],
                                 ],
                               ),
                             ),
@@ -841,92 +905,27 @@ class _ProfileUserPageState extends State<ProfileUserPage> {
     );
 
     try {
-      final DocumentSnapshot doc =
-          await (itemType == 'souvenir'
-              ? _firestore.collection('souvenirs').doc(docId).get()
-              : _firestore.collection('journees').doc(docId).get());
-
+      final DocumentSnapshot doc = await (itemType == 'souvenir'
+          ? _firestore.collection('souvenirs').doc(docId).get()
+          : _firestore.collection('journees').doc(docId).get());
+      
       if (!mounted) return;
-      Navigator.of(currentContext).pop(); // Ferme le loader
+      Navigator.of(currentContext).pop();
 
       if (!doc.exists) throw Exception("$itemType introuvable");
 
-      final Map<String, dynamic> data =
-          doc.data() as Map<String, dynamic>? ?? {};
-      final String texte =
-          (itemType == 'souvenir'
-                  ? (data['texte'] ?? '')
-                  : (data['texte1'] ?? data['texte'] ?? ''))
-              as String;
-      final String? emoji = data['emoji'] as String?;
-      final List<dynamic> photos = data['photoUrls'] ?? [];
-
-      showDialog(
-        context: currentContext,
-        builder: (ctx) {
-          final bool isDarkMode = Theme.of(ctx).brightness == Brightness.dark;
-          return AlertDialog(
-            backgroundColor: isDarkMode ? Colors.grey.shade900 : Colors.white,
-            title: Text(
-              itemType == 'souvenir' ? 'Souvenir' : 'Journée',
-              style: TextStyle(
-                color: isDarkMode ? Colors.white : Colors.black87,
-              ),
-            ),
-            content: SizedBox(
-              width: double.maxFinite,
-              child: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (emoji != null)
-                      Text(emoji, style: const TextStyle(fontSize: 28)),
-                    const SizedBox(height: 8),
-                    Text(
-                      texte,
-                      style: TextStyle(
-                        color: isDarkMode ? Colors.white70 : Colors.black87,
-                      ),
-                    ),
-                    if (photos.isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        height: 120,
-                        child: ListView.builder(
-                          scrollDirection: Axis.horizontal,
-                          itemCount: photos.length,
-                          itemBuilder:
-                              (_, i) => Padding(
-                                padding: const EdgeInsets.only(right: 8),
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: Image.network(
-                                    photos[i].toString(),
-                                    width: 120,
-                                    height: 120,
-                                    fit: BoxFit.cover,
-                                  ),
-                                ),
-                              ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('Fermer'),
-              ),
-            ],
-          );
-        },
-      );
+      if (itemType == 'souvenir') {
+        final souvenir = SouvenirModel.fromFirestore(doc);
+        _showSouvenirDetailDialog(souvenir);
+      } else {
+        final journee = JourneeModel.fromFirestore(doc);
+        _showJourneeDetailDialog(journee);
+      }
     } catch (e) {
       if (mounted) {
-        Navigator.of(currentContext).pop();
+        if (Navigator.canPop(currentContext)) {
+           Navigator.of(currentContext).pop();
+        }
         ScaffoldMessenger.of(currentContext).showSnackBar(
           SnackBar(
             content: Text("Erreur: Impossible de charger les détails ($e)."),
@@ -1168,7 +1167,6 @@ class _ProfileUserPageState extends State<ProfileUserPage> {
                     : null,
           ),
           const SizedBox(height: 16),
-          // ▼▼▼ MODIFICATION ICI ▼▼▼
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             mainAxisSize: MainAxisSize.min,
@@ -1181,7 +1179,6 @@ class _ProfileUserPageState extends State<ProfileUserPage> {
                 ),
                 textAlign: TextAlign.center,
               ),
-              // On vérifie le statut VIP depuis les données de l'utilisateur
               if (userData['isVip'] ?? false)
                 Padding(
                   padding: const EdgeInsets.only(left: 8.0),
@@ -1193,7 +1190,6 @@ class _ProfileUserPageState extends State<ProfileUserPage> {
                 ),
             ],
           ),
-          // ▲▲▲ FIN DE LA MODIFICATION ▲▲▲
           const SizedBox(height: 4),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -1312,7 +1308,6 @@ class _ProfileUserPageState extends State<ProfileUserPage> {
             ),
           ),
           const SizedBox(height: 12),
-          // On ajoute un scroll horizontal ici
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
@@ -1342,7 +1337,6 @@ class _ProfileUserPageState extends State<ProfileUserPage> {
     final String assetPath = 'assets/${shape}_${color}.png';
     final String text = pinnedItemData['texte'] ?? '';
 
-    // Padding adapté selon la forme
     final double padding;
     switch (shape) {
       case 'coeur':
@@ -1361,7 +1355,7 @@ class _ProfileUserPageState extends State<ProfileUserPage> {
       child: Container(
         width: 150, // Taille fixe
         height: 160, // Taille fixe
-        margin: const EdgeInsets.only(right: 12), // Espace entre les épingles
+        margin: const EdgeInsets.only(right: 12),
         child: Stack(
           alignment: Alignment.center,
           children: [
@@ -1717,8 +1711,6 @@ class _ProfileUserPageState extends State<ProfileUserPage> {
     if (qualite >= 25) return (color: Colors.orange, message: "Difficile");
     return (color: Colors.red, message: "Très difficile");
   }
-
-  String _formatDate(DateTime date) => '${date.day}/${date.month}/${date.year}';
 }
 
 class _SectionCard extends StatelessWidget {
@@ -1921,6 +1913,7 @@ class _FloatingPinnedItemCardState extends State<FloatingPinnedItemCard>
   late AnimationController _controller;
   final Random _random = Random();
   double _x = 0, _y = 0, _vx = 0, _vy = 0;
+  Size _cardActualSize = const Size(150.0, 200.0); // Taille par défaut
 
   @override
   void initState() {
@@ -1929,6 +1922,7 @@ class _FloatingPinnedItemCardState extends State<FloatingPinnedItemCard>
       vsync: this,
       duration: const Duration(milliseconds: 16),
     )..addListener(_updatePosition);
+    
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _initializePositionAndVelocity(context);
@@ -1937,13 +1931,37 @@ class _FloatingPinnedItemCardState extends State<FloatingPinnedItemCard>
     });
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // On résout les vraies dimensions de l'image de l'épingle
+    _resolveImageSize();
+  }
+
+  void _resolveImageSize() {
+    final String shape = widget.itemData['pin_shape'] ?? 'carrer';
+    final String color = widget.itemData['pin_color'] ?? 'bleu';
+    final assetPath = 'assets/${shape}_${color}.png';
+    
+    final imageProvider = AssetImage(assetPath);
+    final config = createLocalImageConfiguration(context);
+    
+    imageProvider.resolve(config).addListener(ImageStreamListener((ImageInfo info, bool _) {
+      if (mounted) {
+        final double aspect = info.image.width / info.image.height;
+        setState(() {
+          // Ajuste la hauteur de la boîte de collision exactement sur le PNG
+          _cardActualSize = Size(150.0, 150.0 / aspect);
+        });
+      }
+    }));
+  }
+
   void _initializePositionAndVelocity(BuildContext context) {
     final size = MediaQuery.of(context).size;
-    final cardWidth = 150.0;
-    final cardHeight = 150.0 * (4 / 3);
     setState(() {
-      _x = _random.nextDouble() * (size.width - cardWidth);
-      _y = _random.nextDouble() * (size.height - cardHeight);
+      _x = _random.nextDouble() * (size.width - _cardActualSize.width);
+      _y = _random.nextDouble() * (size.height - _cardActualSize.height);
       _vx = (_random.nextDouble() - 0.5) * 1.5;
       _vy = (_random.nextDouble() - 0.5) * 1.5;
     });
@@ -1952,15 +1970,14 @@ class _FloatingPinnedItemCardState extends State<FloatingPinnedItemCard>
   void _updatePosition() {
     if (!mounted) return;
     final size = MediaQuery.of(context).size;
-    final cardWidth = 150.0;
-    final cardHeight = 200.0;
     setState(() {
       _x += _vx;
       _y += _vy;
-      if ((_x <= 0 && _vx < 0) || (_x >= size.width - cardWidth && _vx > 0)) {
+      // On utilise _cardActualSize pour des collisions pixel perfect
+      if ((_x <= 0 && _vx < 0) || (_x >= size.width - _cardActualSize.width && _vx > 0)) {
         _vx *= -1;
       }
-      if ((_y <= 0 && _vy < 0) || (_y >= size.height - cardHeight && _vy > 0)) {
+      if ((_y <= 0 && _vy < 0) || (_y >= size.height - _cardActualSize.height && _vy > 0)) {
         _vy *= -1;
       }
     });
@@ -1996,14 +2013,13 @@ class _FloatingPinnedItemCardState extends State<FloatingPinnedItemCard>
       left: _x,
       top: _y,
       child: SizedBox(
-        width: 150,
-        height: 200,
+        width: _cardActualSize.width,
+        height: _cardActualSize.height,
         child: Stack(
           fit: StackFit.expand,
           children: [
             Image.asset(assetPath, fit: BoxFit.contain),
             Padding(
-              // On met un padding égal de tous les côtés pour que le Center fasse son travail
               padding: EdgeInsets.all(padding),
               child: Align(
                 alignment: Alignment.center,

@@ -1,6 +1,9 @@
 ﻿// home_page.dart
-
+import 'ai_model_selector.dart';
+import 'profil_page.dart';
+import 'package:image_picker/image_picker.dart';
 import 'dart:math' as math;
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -9,6 +12,7 @@ import 'dart:convert';
 import 'journee_page.dart';
 import 'souvenir_page.dart';
 import 'addamis_page.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'dart:ui';
 import 'profil_page.dart';
 import 'dart:math';
@@ -20,119 +24,12 @@ import 'journee_model.dart';
 import 'dart:async';
 import 'souvenir_model.dart';
 import 'souvenir_model.dart' as sm;
-import 'package:collection/collection.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:firebase_storage/firebase_storage.dart';
-import 'dart:io';
-import 'ai_model_selector.dart';
+import 'theme_manager.dart';
+import 'notification_service.dart';
 
-const String DEEPSEEK_API_KEY = 'HA2RvSG1u7aE7u78yXd1UqnBuMY6VV70';
-const String ONE_SIGNAL_APP_ID = "8046e";
-const String ONE_SIGNAL_REST_API_KEY = "os_v2_app_qpc4aj3w66k6ewldrlguka";
-const String _kApiUrl = 'https://api.deepinfra.com/v1/openai/chat/completions';
+const String DEEPSEEK_API_KEY = 'VOTRE_CLÉ_API_DEEPSEEK';
 const int _kNonVipAutobiographyCooldownDays = 14;
-
-// ... Le code de NotificationService, getUserSubscriptionData, showVipPromotionPopup, AutobiographieDialog reste inchangé ...
-class NotificationService {
-  // ... Le code de NotificationService reste inchangé ...
-  static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-
-  static Future<void> sendNotification({
-    required List<String> playerIds,
-    required String title,
-    required String message,
-  }) async {
-    if (ONE_SIGNAL_REST_API_KEY == "VOTRE_REST_API_KEY_ONESIGNAL") {
-      print("--- ERREUR NOTIFICATION: Clé REST API OneSignal non configurée.");
-      return;
-    }
-
-    final validPlayerIds = playerIds.where((id) => id.isNotEmpty).toList();
-    if (validPlayerIds.isEmpty) {
-      print("--- INFO NOTIFICATION: Aucun Player ID valide à notifier.");
-      return;
-    }
-
-    try {
-      await http.post(
-        Uri.parse('https://onesignal.com/api/v1/notifications'),
-        headers: <String, String>{
-          'Content-Type': 'application/json; charset=UTF-8',
-          'Authorization': 'Basic $ONE_SIGNAL_REST_API_KEY',
-        },
-        body: jsonEncode(<String, dynamic>{
-          "app_id": ONE_SIGNAL_APP_ID,
-          "include_player_ids": validPlayerIds,
-          "headings": {"en": title},
-          "contents": {"en": message},
-        }),
-      );
-      print(
-        "--- INFO NOTIFICATION: Notification envoyée à ${validPlayerIds.join(', ')}",
-      );
-    } catch (e) {
-      print("--- ERREUR NOTIFICATION: Échec de l'envoi de la notification: $e");
-    }
-  }
-
-  static Future<void> notifyFriendsOfNewPost(String authorName) async {
-    final currentUser = FirebaseAuth.instance.currentUser;
-    if (currentUser == null) return;
-
-    final friendsSnapshot =
-        await _firestore
-            .collection('friends')
-            .where('users', arrayContains: currentUser.uid)
-            .get();
-    final friendIds =
-        friendsSnapshot.docs
-            .expand((doc) => List<String>.from(doc['users']))
-            .toSet()
-          ..remove(currentUser.uid);
-
-    if (friendIds.isEmpty) return;
-
-    final List<String> playerIds = [];
-    for (String friendId in friendIds) {
-      final userDoc = await _firestore.collection('users').doc(friendId).get();
-      if (userDoc.exists && userDoc.data()!.containsKey('oneSignalPlayerId')) {
-        playerIds.add(userDoc['oneSignalPlayerId']);
-      }
-    }
-
-    sendNotification(
-      playerIds: playerIds,
-      title: "Nouvelle journée !",
-      message: "$authorName a partagé sa journée.",
-    );
-  }
-
-  static Future<void> notifyOwnerOnInteraction({
-    required String journeeId,
-    required String interactorName,
-    required String action, // "commenté" ou "réagi à"
-  }) async {
-    final currentUser = FirebaseAuth.instance.currentUser;
-    if (currentUser == null) return;
-
-    final journeeDoc =
-        await _firestore.collection('journees').doc(journeeId).get();
-    if (!journeeDoc.exists) return;
-
-    final ownerId = journeeDoc['userId'];
-    if (ownerId == currentUser.uid) return; // Ne pas se notifier soi-même
-
-    final ownerDoc = await _firestore.collection('users').doc(ownerId).get();
-    if (ownerDoc.exists && ownerDoc.data()!.containsKey('oneSignalPlayerId')) {
-      final playerId = ownerDoc['oneSignalPlayerId'];
-      sendNotification(
-        playerIds: [playerId],
-        title: "Nouvelle interaction !",
-        message: "$interactorName a $action votre journée.",
-      );
-    }
-  }
-}
+const String _kApiUrl = 'https://api.deepinfra.com/v1/openai/chat/completions';
 // ... Le reste du code (getUserSubscriptionData, showVipPromotionPopup, AutobiographieDialog) reste inchangé ...
 
 Future<Map<String, dynamic>> getUserSubscriptionData() async {
@@ -3551,7 +3448,6 @@ class _MovingContentCardState extends State<MovingContentCard>
       end: 0,
     ).animate(_effectController);
 
-    // Le calcul des dimensions et le démarrage des animations se feront après le premier rendu
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _updateDimensionsAndInitialize();
@@ -3560,46 +3456,70 @@ class _MovingContentCardState extends State<MovingContentCard>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // On résout la vraie taille du PNG dès qu'on a le contexte
+    _resolveImageSize();
+  }
+
+  @override
   void didUpdateWidget(covariant MovingContentCard oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.size != oldWidget.size) {
+      _setBaseCardSize();
+    }
+    // Si l'image change, on recalcule ses dimensions exactes
+    if (widget.design != oldWidget.design ||
+        widget.color != oldWidget.color ||
+        widget.size != oldWidget.size) {
+      _resolveImageSize();
+    }
     if (widget.animationType != oldWidget.animationType) {
-      // Si le type d'animation change, on réinitialise tout
       _initializeAnimations();
     }
+  }
+
+  void _resolveImageSize() {
+    final imageProvider = AssetImage(
+      _getImagePath(widget.design, widget.color),
+    );
+    final config = createLocalImageConfiguration(context);
+    imageProvider
+        .resolve(config)
+        .addListener(
+          ImageStreamListener((ImageInfo info, bool _) {
+            if (mounted) {
+              final double aspect = info.image.width / info.image.height;
+              setState(() {
+                // On définit la taille exacte de l'image basée sur son vrai ratio
+                _cardActualSize = Size(_cardWidth, _cardWidth / aspect);
+              });
+            }
+          }),
+        );
   }
 
   // =========================================================================
   // --- 1. GESTION DES DIMENSIONS ET DE L'INITIALISATION ---
   // =========================================================================
 
-  /// Méthode principale qui calcule les dimensions et lance les animations.
   void _updateDimensionsAndInitialize() async {
     if (!mounted) return;
 
-    // A. Calculer les dimensions de la zone parente et de la carte elle-même
     _parentSize = widget.parentConstraints.biggest;
-    final RenderBox? renderBox =
-        _cardKey.currentContext?.findRenderObject() as RenderBox?;
-    if (renderBox != null && renderBox.hasSize) {
-      _cardActualSize = renderBox.size;
-    }
-    // Fallback : si la mesure n'est pas prête, on utilise _cardWidth (carré)
+
+    // Fallback de sécurité si l'image met du temps à se résoudre
     if (_cardActualSize == Size.zero) {
       _cardActualSize = Size(_cardWidth, _cardWidth);
     }
 
-    // B. Définir une position de départ aléatoire une fois les dimensions connues
     _setRandomInitialPosition();
-
-    // C. Charger les préférences de vitesse et initialiser le type d'animation
     await _loadAnimationSettings();
     _initializeAnimations();
 
-    // D. Démarrer la boucle de déplacement
     _moveController.addListener(_tick);
   }
 
-  /// Définit la largeur de base de la carte en fonction de la prop `size`.
   void _setBaseCardSize() {
     const double baseSize = 250.0;
     switch (widget.size) {
@@ -3617,7 +3537,6 @@ class _MovingContentCardState extends State<MovingContentCard>
     }
   }
 
-  /// Charge la vitesse d'animation depuis SharedPreferences.
   Future<void> _loadAnimationSettings() async {
     try {
       SharedPreferences prefs = await SharedPreferences.getInstance();
@@ -3628,14 +3547,12 @@ class _MovingContentCardState extends State<MovingContentCard>
     }
   }
 
-  /// Configure et démarre les contrôleurs en fonction du type d'animation.
   void _initializeAnimations() {
     _moveController.duration = _getSpeedDuration();
     _effectController.stop();
     _fadeTimer?.cancel();
     _isStaticMode = false;
 
-    // Réinitialise les listeners pour éviter les doublons
     _effectController.removeListener(_updateFloatOffset);
 
     switch (widget.animationType) {
@@ -3678,7 +3595,6 @@ class _MovingContentCardState extends State<MovingContentCard>
         ).animate(_effectController);
     }
 
-    // Démarrer le mouvement si l'animation n'est pas statique
     if (!_isStaticMode) {
       if (!_moveController.isAnimating) {
         _moveController.repeat();
@@ -3692,18 +3608,14 @@ class _MovingContentCardState extends State<MovingContentCard>
   // --- 2. BOUCLE D'ANIMATION PRINCIPALE ET LOGIQUE DE DÉPLACEMENT ---
   // =========================================================================
 
-  /// Cette méthode est appelée à chaque frame par le `_moveController`.
   void _tick() {
     if (!mounted || _isStaticMode || _parentSize == Size.zero) return;
 
-    // A. Calculer la prochaine position potentielle
     final double nextX = _positionX + _velocityX;
     final double nextY = _positionY + _velocityY;
 
-    // B. Vérifier et corriger cette position en fonction des collisions
     final Map<String, double> result = _handleBoundaryCollisions(nextX, nextY);
 
-    // C. Mettre à jour l'état de la carte avec les nouvelles valeurs
     setState(() {
       _positionX = result['x']!;
       _positionY = result['y']!;
@@ -3716,7 +3628,6 @@ class _MovingContentCardState extends State<MovingContentCard>
   // --- 3. GESTION DES COLLISIONS AVEC LES BORDS ---
   // =========================================================================
 
-  /// Vérifie si la carte dépasse les limites et retourne la position et la vélocité corrigées.
   Map<String, double> _handleBoundaryCollisions(
     double proposedX,
     double proposedY,
@@ -3727,25 +3638,21 @@ class _MovingContentCardState extends State<MovingContentCard>
     double newVy = _velocityY;
     bool hasCollided = false;
 
-    // Obtenir la taille et le décalage effectifs pour le calcul de collision
     final cardWidth = _getEffectiveWidth();
     final cardHeight = _getEffectiveHeight();
     final isFloating = widget.animationType == 'flottant';
     final currentFloatOffsetX = isFloating ? _floatOffsetX : 0.0;
     final currentFloatOffsetY = isFloating ? _floatOffsetY : 0.0;
 
-    // Si la hauteur de la carte n'a pas encore été calculée, on ne fait rien pour éviter les erreurs.
     if (cardHeight <= 0) {
       return {'x': correctedX, 'y': correctedY, 'vx': newVx, 'vy': newVy};
     }
 
-    // Calculer les bords effectifs de la carte à sa position proposée
     final effectiveLeft = proposedX + currentFloatOffsetX;
     final effectiveRight = effectiveLeft + cardWidth;
     final effectiveTop = proposedY + currentFloatOffsetY;
     final effectiveBottom = effectiveTop + cardHeight;
 
-    // Vérifier les collisions horizontales
     if (effectiveLeft < 0) {
       correctedX = -currentFloatOffsetX;
       newVx = _velocityX.abs();
@@ -3756,7 +3663,6 @@ class _MovingContentCardState extends State<MovingContentCard>
       hasCollided = true;
     }
 
-    // Vérifier les collisions verticales
     if (effectiveTop < 0) {
       correctedY = -currentFloatOffsetY;
       newVy = _velocityY.abs();
@@ -3774,10 +3680,6 @@ class _MovingContentCardState extends State<MovingContentCard>
     return {'x': correctedX, 'y': correctedY, 'vx': newVx, 'vy': newVy};
   }
 
-  // =========================================================================
-  // --- MÉTHODES UTILITAIRES ET GESTIONNAIRES D'ÉVÉNEMENTS ---
-  // =========================================================================
-
   void _updateFloatOffset() {
     if (mounted) {
       setState(() {
@@ -3789,7 +3691,6 @@ class _MovingContentCardState extends State<MovingContentCard>
 
   void _setRandomInitialPosition() {
     if (_parentSize == Size.zero) return;
-    // Utiliser les dimensions effectives (avec fallback _cardWidth)
     final double cardW =
         _cardActualSize.width > 0 ? _cardActualSize.width : _cardWidth;
     final double cardH =
@@ -3804,7 +3705,6 @@ class _MovingContentCardState extends State<MovingContentCard>
       _positionY = margin + _random.nextDouble() * availableHeight;
     }
 
-    // Donner une vélocité initiale aléatoire
     _velocityX = (_random.nextDouble() - 0.5) * 3.5;
     _velocityY = (_random.nextDouble() - 0.5) * 3.5;
     if (_velocityX.abs() < 1.0) _velocityX = _velocityX.sign * 1.0;
@@ -3820,7 +3720,6 @@ class _MovingContentCardState extends State<MovingContentCard>
     }
   }
 
-  // Fonctions pour obtenir les durées et tailles effectives
   Duration _getSpeedDuration() {
     switch (_animationSpeed) {
       case 'lent':
@@ -3861,7 +3760,6 @@ class _MovingContentCardState extends State<MovingContentCard>
     return baseHeight;
   }
 
-  // --- Logique pour l'animation 'changer' (non modifiée) ---
   void _scheduleRandomFade() {
     if (widget.animationType != 'changer') return;
     _fadeTimer?.cancel();
@@ -3897,7 +3795,6 @@ class _MovingContentCardState extends State<MovingContentCard>
     });
   }
 
-  // --- Le reste des méthodes build, dispose, etc. ---
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -3924,7 +3821,6 @@ class _MovingContentCardState extends State<MovingContentCard>
             );
             break;
           case 'flottant':
-            // Le décalage est appliqué ici, sur la position de base calculée dans _tick()
             finalLeft += _floatOffsetX;
             finalTop += _floatOffsetY;
             transformedChild = child!;
@@ -3954,7 +3850,6 @@ class _MovingContentCardState extends State<MovingContentCard>
                   _effectController.stop();
                   _moveController.stop();
                   widget.onTap!();
-                  // Restart animations after dialog is dismissed
                   if (mounted) _initializeAnimations();
                 },
         child: Stack(
@@ -3964,16 +3859,12 @@ class _MovingContentCardState extends State<MovingContentCard>
             Image.asset(
               _getImagePath(widget.design, widget.color),
               width: _cardWidth,
-              // ================== CORRECTION APPLIQUÉE ICI ==================
-              // On force la hauteur pour garantir une taille carrée et prévisible.
-              // Cela assure que _cardActualSize.height sera correct.
-              height: _cardWidth,
-              // =============================================================
+              // La hauteur n'est plus forcée ici pour respecter le vrai ratio de l'image.
               fit: BoxFit.contain,
               errorBuilder: (context, error, stackTrace) {
                 return Container(
                   width: _cardWidth,
-                  height: _cardWidth, // Assumer carré pour le fallback
+                  height: _cardWidth,
                   color: Colors.grey.shade200,
                   child: Icon(
                     Icons.broken_image,
@@ -4076,7 +3967,9 @@ class HomePageState extends State<HomePage>
   List<SouvenirModel> _displayedSouvenirs = [];
   List<SouvenirModel> _filteredSouvenirs = [];
   late Future<String> _cardSizeFuture;
-final ValueNotifier<String> _tabTitleNotifier = ValueNotifier<String>('Mes Journées');
+  final ValueNotifier<String> _tabTitleNotifier = ValueNotifier<String>(
+    'Mes Journées',
+  );
   List<JourneeModel> _friendsJournees = [];
   List<JourneeModel> _globalJournees = [];
   List<SouvenirModel> _souvenirs = [];
@@ -4169,6 +4062,34 @@ final ValueNotifier<String> _tabTitleNotifier = ValueNotifier<String>('Mes Journ
     _forceGlobalSouvenirColorFuture = _getPreferenceBool(
       'forceGlobalSouvenirColor',
       false,
+    );
+
+    // Lancer la petite animation de "slide" après l'initialisation de la vue
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _showSwipeHint();
+    });
+  }
+
+  void _showSwipeHint() async {
+    await Future.delayed(
+      const Duration(milliseconds: 800),
+    ); // Attend un peu le chargement initial
+    if (!mounted || !_verticalMainPageController.hasClients) return;
+
+    // Glisse légèrement vers le bas (100 pixels)
+    await _verticalMainPageController.animateTo(
+      100.0,
+      duration: const Duration(milliseconds: 500),
+      curve: Curves.easeOut,
+    );
+
+    if (!mounted || !_verticalMainPageController.hasClients) return;
+
+    // Revient à la position initiale
+    await _verticalMainPageController.animateTo(
+      0.0,
+      duration: const Duration(milliseconds: 500),
+      curve: Curves.easeIn,
     );
   }
 
@@ -4327,10 +4248,6 @@ final ValueNotifier<String> _tabTitleNotifier = ValueNotifier<String>('Mes Journ
 
     User? currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) return;
-
-    setState(() {
-      _isLoading = true;
-    });
 
     _myJourneesSubscription = _firestore
         .collection('journees')
@@ -4574,10 +4491,16 @@ final ValueNotifier<String> _tabTitleNotifier = ValueNotifier<String>('Mes Journ
     // 1. Vérifier si les conseils existent déjà dans Firestore pour éviter de régénérer
     if (journee.id != null) {
       try {
-        DocumentSnapshot doc = await FirebaseFirestore.instance.collection('journees').doc(journee.id).get();
+        DocumentSnapshot doc =
+            await FirebaseFirestore.instance
+                .collection('journees')
+                .doc(journee.id)
+                .get();
         if (doc.exists) {
           Map<String, dynamic>? data = doc.data() as Map<String, dynamic>?;
-          if (data != null && data.containsKey('conseilsIA') && data['conseilsIA'] is List) {
+          if (data != null &&
+              data.containsKey('conseilsIA') &&
+              data['conseilsIA'] is List) {
             List<String> savedConseils = List<String>.from(data['conseilsIA']);
             if (savedConseils.isNotEmpty) {
               _afficherPopupConseils(savedConseils);
@@ -4599,7 +4522,8 @@ final ValueNotifier<String> _tabTitleNotifier = ValueNotifier<String>('Mes Journ
 
     try {
       const url = 'https://api.deepinfra.com/v1/openai/chat/completions';
-      String texteAnalyse = journee.texte1 ?? journee.commentaire ?? 'Aucun détail fourni.';
+      String texteAnalyse =
+          journee.texte1 ?? journee.commentaire ?? 'Aucun détail fourni.';
 
       String prompt = '''
 Tu es un coach de vie bienveillant et un psychologue expert. 
@@ -4645,12 +4569,24 @@ Format attendu:
 
         // --- NETTOYAGE ROBUSTE ---
         // Supprimer les balises de réflexion de l'IA (ex: <think> ... </think> ou <thought> ... </thought>)
-        content = content.replaceAll(RegExp(r'<think>[\s\S]*?<\/think>', dotAll: true), '');
-        content = content.replaceAll(RegExp(r'<thought>[\s\S]*?<\/thought>', dotAll: true), '');
+        content = content.replaceAll(
+          RegExp(r'<think>[\s\S]*?<\/think>', dotAll: true),
+          '',
+        );
+        content = content.replaceAll(
+          RegExp(r'<thought>[\s\S]*?<\/thought>', dotAll: true),
+          '',
+        );
 
         // Enlever les balises markdown (```json)
-        content = content.replaceAll(RegExp(r'^```(?:json)?\s*|\s*```$', multiLine: true), '').trim();
-        
+        content =
+            content
+                .replaceAll(
+                  RegExp(r'^```(?:json)?\s*|\s*```$', multiLine: true),
+                  '',
+                )
+                .trim();
+
         // Extraire uniquement l'objet JSON
         final jsonMatch = RegExp(r'\{[\s\S]*\}').firstMatch(content);
         if (jsonMatch != null) {
@@ -4672,13 +4608,13 @@ Format attendu:
 
         // 3. Sauvegarder les conseils générés dans Firebase pour ne pas rappeler l'IA la prochaine fois
         if (journee.id != null && conseilsList.isNotEmpty) {
-          await FirebaseFirestore.instance.collection('journees').doc(journee.id).update({
-            'conseilsIA': conseilsList
-          });
+          await FirebaseFirestore.instance
+              .collection('journees')
+              .doc(journee.id)
+              .update({'conseilsIA': conseilsList});
         }
 
         _afficherPopupConseils(conseilsList);
-
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Impossible de générer les conseils')),
@@ -4696,52 +4632,53 @@ Format attendu:
   void _afficherPopupConseils(List<String> conseilsList) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-        ),
-        title: Row(
-          children: [
-            Icon(Icons.psychology, color: Colors.blue.shade700),
-            const SizedBox(width: 10),
-            const Text(
-              'Conseils IA',
-              style: TextStyle(color: Colors.blue, fontSize: 18),
+      builder:
+          (context) => AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
             ),
-          ],
-        ),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView.separated(
-            shrinkWrap: true,
-            itemCount: conseilsList.length,
-            separatorBuilder: (_, __) => const Divider(),
-            itemBuilder: (context, index) {
-              return ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: Colors.blue.shade100,
-                  radius: 12,
-                  child: Text(
-                    '${index + 1}',
-                    style: const TextStyle(fontSize: 12),
-                  ),
+            title: Row(
+              children: [
+                Icon(Icons.psychology, color: Colors.blue.shade700),
+                const SizedBox(width: 10),
+                const Text(
+                  'Conseils IA',
+                  style: TextStyle(color: Colors.blue, fontSize: 18),
                 ),
-                title: Text(
-                  conseilsList[index],
-                  style: const TextStyle(fontSize: 14),
-                ),
-                contentPadding: EdgeInsets.zero,
-              );
-            },
+              ],
+            ),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: conseilsList.length,
+                separatorBuilder: (_, __) => const Divider(),
+                itemBuilder: (context, index) {
+                  return ListTile(
+                    leading: CircleAvatar(
+                      backgroundColor: Colors.blue.shade100,
+                      radius: 12,
+                      child: Text(
+                        '${index + 1}',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ),
+                    title: Text(
+                      conseilsList[index],
+                      style: const TextStyle(fontSize: 14),
+                    ),
+                    contentPadding: EdgeInsets.zero,
+                  );
+                },
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Fermer'),
+              ),
+            ],
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Fermer'),
-          ),
-        ],
-      ),
     );
   }
 
@@ -4929,7 +4866,6 @@ Format attendu:
     super.build(context);
 
     bool hasPostedToday = _hasPostedToday();
-
 
     return DefaultTabController(
       length: 3,

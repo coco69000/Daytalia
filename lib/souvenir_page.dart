@@ -16,12 +16,10 @@ import 'package:http/http.dart' as http; // AJOUTÉ : Importation nécessaire po
 import 'dart:convert'; // AJOUTÉ : Importation nécessaire pour encoder/décoder le JSON
 import 'home_page.dart' show getUserSubscriptionData, showVipPromotionPopup;
 import 'ai_model_selector.dart';
+import 'theme_manager.dart';
 
 // Importez votre HomeBarrePage si vous y naviguez après la sauvegarde
 import 'main.dart'; // Assurez-vous que cette importation est correcte
-
-// THEME: Variable globale pour le mode sombre (vous pouvez la déplacer dans main.dart)
-final ValueNotifier<Brightness> appBrightnessNotifier = ValueNotifier<Brightness>(Brightness.light);
 
 // AJOUTÉ : Clé API nécessaire pour l'analyse des éléments intéressants.
 // (À NE PAS LAISSER EN DUR EN PRODUCTION !)
@@ -117,7 +115,6 @@ class _SouvenirPageState extends State<SouvenirPage> {
   @override
   void initState() {
     super.initState();
-    _loadAppBrightness();
     _loadFriends();
     _souvenirController.addListener(_onSouvenirTextChange);
     _checkVipAndAnalysisStatus(); // NOUVEAU: Vérifier le statut au démarrage
@@ -255,29 +252,6 @@ class _SouvenirPageState extends State<SouvenirPage> {
     _souvenirController.dispose();
     _removeOverlay(); // Supprime l'overlay si visible
     super.dispose();
-  }
-
-  // THEME: Nouvelle fonction pour charger la préférence de thème
-  Future<void> _loadAppBrightness() async {
-    try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      String? themeMode = prefs.getString('themeMode');
-
-      Brightness loadedBrightness = Brightness.light;
-      if (themeMode == 'dark') {
-        loadedBrightness = Brightness.dark;
-      } else if (themeMode == 'light') {
-        loadedBrightness = Brightness.light;
-      } else {
-        loadedBrightness = WidgetsBinding.instance.platformDispatcher.platformBrightness;
-      }
-
-      if (mounted) {
-        appBrightnessNotifier.value = loadedBrightness;
-      }
-    } catch (e) {
-      print('Erreur de chargement du thème : $e');
-    }
   }
 
   void _loadSouvenirForEditing() {

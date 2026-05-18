@@ -45,6 +45,12 @@
 		<true/>
 		<key>UIApplicationSupportsIndirectInputEvents</key>
 		<true/>
+		<key>NSCameraUsageDescription</key>
+		<string>Cette app a besoin d'accéder à la caméra pour prendre des photos.</string>
+		<key>NSPhotoLibraryUsageDescription</key>
+		<string>Cette app a besoin d'accéder à la photothèque pour choisir des images.</string>
+		<key>NSPhotoLibraryAddUsageDescription</key>
+		<string>Cette app a besoin d'accéder à la photothèque pour enregistrer des images.</string>
 		<key>UIStatusBarHidden</key>
 		<false/>
 	</dict>

@@ -1,0 +1,15 @@
+{
+  "project": "daytalia",
+  "platform": "ios",
+  "github": {
+    "owner": "coco69000",
+    "repo": "Daytalia"
+  },
+  "ios": {},
+  "flutter": {
+    "version": "\u000e",
+    "watch": {}
+  },
+  "reactNative": {},
+  "mobai": {}
+}

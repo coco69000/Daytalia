@@ -6,10 +6,12 @@
     "repo": "Daytalia"
   },
   "ios": {
-    "path": "."
+    "path": "ios" 
   },
   "flutter": {
     "version": "3.41.5",
     "watch": {}
-  }
+  },
+  "reactNative": {},
+  "mobai": {}
 }

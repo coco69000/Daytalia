@@ -207,7 +207,16 @@ jobs:
               echo "DEVELOPMENT_TEAM="               >> ios/Flutter/Release.xcconfig
               echo "PROVISIONING_PROFILE_SPECIFIER=" >> ios/Flutter/Release.xcconfig
 
-              # 4. Build direct avec xcodebuild, tous les flags signing désactivés
+              # 4. ✅ FIX : installer les pods APRÈS --config-only
+              #    (--config-only regénère GeneratedPluginRegistrant.m qui référence
+              #    cloud_firestore, firebase_auth, etc. — sans pod install ces frameworks
+              #    ne sont pas liés et xcodebuild échoue avec "Module not found")
+              echo "Running pod install..."
+              cd ios
+              pod install
+              cd "$GITHUB_WORKSPACE"
+
+              # 5. Build direct avec xcodebuild, tous les flags signing désactivés
               cd ios
               xcodebuild \
                 -workspace Runner.xcworkspace \

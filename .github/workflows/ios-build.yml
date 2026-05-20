@@ -180,6 +180,9 @@ jobs:
 
           DERIVED_DATA_PATH="${GITHUB_WORKSPACE}/DerivedData"
 
+          # ✅ On mémorise le type original AVANT de le modifier
+          ORIGINAL_PROJECT_TYPE="$PROJECT_TYPE"
+
           if [ "$PROJECT_TYPE" = "flutter" ]; then
             cd "$GITHUB_WORKSPACE"
 
@@ -190,11 +193,9 @@ jobs:
               echo "Building Flutter iOS Release via xcodebuild..."
 
               # 1. Générer les fichiers de config Flutter (plugins, assets, etc.)
-              #    Le || true ignore l'échec éventuel sur la validation du signing
               flutter build ios --config-only --release || true
 
               # 2. Patcher le pbxproj pour forcer le signing en Manual
-              #    (Xcode lit le pbxproj en priorité sur les xcconfig)
               sed -i '' \
                 -e 's/DEVELOPMENT_TEAM = [^;]*;/DEVELOPMENT_TEAM = "";/g' \
                 -e 's/CODE_SIGN_STYLE = Automatic;/CODE_SIGN_STYLE = Manual;/g' \
@@ -207,7 +208,7 @@ jobs:
               echo "DEVELOPMENT_TEAM="               >> ios/Flutter/Release.xcconfig
               echo "PROVISIONING_PROFILE_SPECIFIER=" >> ios/Flutter/Release.xcconfig
 
-              # 4. ✅ FIX : installer les pods APRÈS --config-only
+              # 4. ✅ FIX pod install : installer les pods APRÈS --config-only
               #    (--config-only regénère GeneratedPluginRegistrant.m qui référence
               #    cloud_firestore, firebase_auth, etc. — sans pod install ces frameworks
               #    ne sont pas liés et xcodebuild échoue avec "Module not found")
@@ -235,7 +236,8 @@ jobs:
             fi
 
             cd "$GITHUB_WORKSPACE"
-            # Le .app est dans DerivedData, on traite la suite comme un projet native
+            # On réassigne PROJECT_TYPE pour la section IPA (native paths)
+            # mais ORIGINAL_PROJECT_TYPE garde "flutter" pour choisir le bon APP_PATH
             PROJECT_TYPE="native"
             cd "$IOS_PATH"
 
@@ -319,25 +321,36 @@ jobs:
             echo "Created signed IPA: build/$BUILD_ID.ipa"
 
           else
-            if [ "$PROJECT_TYPE" = "flutter" ]; then
-              APP_PATH=$(find "${GITHUB_WORKSPACE}/build/ios/iphoneos" -name "*.app" -type d | head -1)
+            # ✅ FIX APP_PATH : on utilise ORIGINAL_PROJECT_TYPE (pas PROJECT_TYPE
+            #    qui a été réécrasé à "native" après le build Flutter) pour savoir
+            #    où chercher le .app.
+            #    Flutter + xcodebuild direct → .app dans DerivedData (pas build/ios/iphoneos)
+            if [ "$ORIGINAL_PROJECT_TYPE" = "flutter" ]; then
+              APP_PATH=$(find "$DERIVED_DATA_PATH/Build/Products/${CONFIGURATION}-iphoneos" -name "*.app" -type d | head -1)
+              # Fallback au cas où xcodebuild a mis le .app ailleurs dans DerivedData
+              if [ -z "$APP_PATH" ]; then
+                APP_PATH=$(find "$DERIVED_DATA_PATH" -name "*.app" -type d \
+                  ! -path "*/PlugIns/*" ! -path "*/Watch/*" | head -1)
+              fi
             else
               APP_PATH=$(find "$DERIVED_DATA_PATH/Build/Products/${CONFIGURATION}-iphoneos" -name "*.app" -type d | head -1)
             fi
 
             if [ -z "$APP_PATH" ]; then
-              echo "Error: Could not find .app"
+              echo "❌ Error: Could not find .app in DerivedData"
+              echo "Contents of DerivedData/Build/Products:"
+              find "$DERIVED_DATA_PATH/Build/Products" -maxdepth 2 -type d 2>/dev/null || echo "(empty)"
               exit 1
             fi
 
-            echo "Found app at: $APP_PATH"
-            cd ..
+            echo "✅ Found app at: $APP_PATH"
+            cd "$GITHUB_WORKSPACE"
             mkdir -p build/Payload
             cp -R "$APP_PATH" build/Payload/
             cd build
             zip -rq "$BUILD_ID.ipa" Payload
             rm -rf Payload
-            echo "Created unsigned IPA: build/$BUILD_ID.ipa"
+            echo "✅ Created unsigned IPA: build/$BUILD_ID.ipa"
           fi
 
       - name: Upload IPA artifact
@@ -347,6 +360,9 @@ jobs:
           path: build/*.ipa
           retention-days: 7
           if-no-files-found: error
+          compression-level: 6
+          overwrite: false
+          include-hidden-files: false
 
       - name: Save DerivedData cache
         uses: actions/cache/save@v4
@@ -381,7 +397,7 @@ jobs:
           else
             echo "- **Signing:** Unsigned (sign locally with AltStore/Sideloadly)" >> $GITHUB_STEP_SUMMARY
           fi
-          if [ -f build/*.ipa ]; then
-            IPA_PATH=$(find build -name "*.ipa" -type f | head -1)
+          IPA_PATH=$(find build -name "*.ipa" -type f 2>/dev/null | head -1)
+          if [ -n "$IPA_PATH" ]; then
             echo "- **IPA Size:** $(ls -lh "$IPA_PATH" | awk '{print $5}')" >> $GITHUB_STEP_SUMMARY
           fi

@@ -189,7 +189,7 @@ jobs:
           DERIVED_DATA_PATH="${GITHUB_WORKSPACE}/DerivedData"
 
           if [ "$PROJECT_TYPE" = "flutter" ]; then
-            cd ..
+            cd "$GITHUB_WORKSPACE"
             if [ "$CONFIGURATION" = "Debug" ]; then
               echo "Building Flutter iOS Debug..."
               flutter build ios --debug --no-codesign

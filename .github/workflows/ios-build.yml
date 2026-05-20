@@ -195,11 +195,17 @@ jobs:
               flutter build ios --debug --no-codesign
             else
               echo "Building Flutter iOS Release..."
-              # Injection directe des flags dans la configuration pour contourner la signature Xcode
+              # On configure explicitement le projet Xcode pour interdire la signature
+              flutter build ios --config-only --release
+              
+              # On force la désactivation absolue au niveau de Xcode
               echo "CODE_SIGNING_ALLOWED=NO" >> ios/Flutter/Release.xcconfig
               echo "CODE_SIGNING_REQUIRED=NO" >> ios/Flutter/Release.xcconfig
+              echo "DEVELOPMENT_TEAM=" >> ios/Flutter/Release.xcconfig
+              echo "PROVISIONING_PROFILE_SPECIFIER=" >> ios/Flutter/Release.xcconfig
               
-              flutter build ios --release --no-codesign --build-name=1.0.0 --build-number=1
+              # On lance le vrai build final compilé de manière brute
+              flutter build ios --release --no-codesign
             fi
             cd "$IOS_PATH"
           elif [ "$PROJECT_TYPE" = "reactnative" ] || [ "$PROJECT_TYPE" = "expo" ]; then

@@ -74,7 +74,7 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ inputs.flutter_version || '' }}
-          channel: ${{ inputs.flutter_version && 'stable' || 'stable' }}
+          channel: stable
           cache: true
 
       - name: Flutter pub get
@@ -121,7 +121,6 @@ jobs:
         run: |
           set -e
 
-          # Create temporary keychain
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
           KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
 
@@ -129,14 +128,12 @@ jobs:
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
-          # Import certificate
           CERTIFICATE_PATH=$RUNNER_TEMP/certificate.p12
           echo "$IOS_CERTIFICATE" | base64 --decode > "$CERTIFICATE_PATH"
           security import "$CERTIFICATE_PATH" -P "$IOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
           security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security list-keychain -d user -s "$KEYCHAIN_PATH"
 
-          # Install provisioning profile
           PROFILE_PATH=$RUNNER_TEMP/profile.mobileprovision
           echo "$IOS_PROVISIONING_PROFILE" | base64 --decode > "$PROFILE_PATH"
 
@@ -158,21 +155,17 @@ jobs:
         run: |
           set -e
 
-          # Navigate to iOS project
           cd "$IOS_PATH"
 
-          # Find workspace or project
           WORKSPACE=$(find . -maxdepth 1 -name "*.xcworkspace" | head -1)
           PROJECT=$(find . -maxdepth 1 -name "*.xcodeproj" | head -1)
 
-          # Install pods if Podfile exists (always run to ensure sync with Podfile.lock)
           if [ -f "Podfile" ]; then
             echo "Running pod install..."
             pod install
             WORKSPACE=$(find . -maxdepth 1 -name "*.xcworkspace" | head -1)
           fi
 
-          # Determine scheme (only needed for native projects)
           if [ -z "$SCHEME" ] && [ "$PROJECT_TYPE" = "native" ]; then
             if [ -n "$WORKSPACE" ]; then
               SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list 2>/dev/null | grep -A 100 "Schemes:" | tail -n +2 | grep -v -E "^[[:space:]]*Pods-" | head -1 | xargs)
@@ -185,28 +178,39 @@ jobs:
             echo "Building with scheme: $SCHEME (configuration: $CONFIGURATION)"
           fi
 
-          # Use custom DerivedData path for caching
           DERIVED_DATA_PATH="${GITHUB_WORKSPACE}/DerivedData"
 
           if [ "$PROJECT_TYPE" = "flutter" ]; then
             cd "$GITHUB_WORKSPACE"
+
             if [ "$CONFIGURATION" = "Debug" ]; then
               echo "Building Flutter iOS Debug..."
               flutter build ios --debug --no-codesign
             else
               echo "Building Flutter iOS Release via xcodebuild..."
-              # 1. On prépare les fichiers, les assets et les plugins proprement
-              flutter build ios --config-only --release
-              
-              # 2. On force la désactivation de la signature dans la config
-              echo "CODE_SIGNING_ALLOWED=NO" >> ios/Flutter/Release.xcconfig
-              echo "CODE_SIGNING_REQUIRED=NO" >> ios/Flutter/Release.xcconfig
-              echo "DEVELOPMENT_TEAM=" >> ios/Flutter/Release.xcconfig
+
+              # 1. Générer les fichiers de config Flutter (plugins, assets, etc.)
+              #    Le || true ignore l'échec éventuel sur la validation du signing
+              flutter build ios --config-only --release || true
+
+              # 2. Patcher le pbxproj pour forcer le signing en Manual
+              #    (Xcode lit le pbxproj en priorité sur les xcconfig)
+              sed -i '' \
+                -e 's/DEVELOPMENT_TEAM = [^;]*;/DEVELOPMENT_TEAM = "";/g' \
+                -e 's/CODE_SIGN_STYLE = Automatic;/CODE_SIGN_STYLE = Manual;/g' \
+                -e 's/ProvisioningStyle = Automatic;/ProvisioningStyle = Manual;/g' \
+                ios/Runner.xcodeproj/project.pbxproj
+
+              # 3. Écrire les xcconfig APRÈS le --config-only (qui les écrase)
+              echo "CODE_SIGNING_ALLOWED=NO"          >> ios/Flutter/Release.xcconfig
+              echo "CODE_SIGNING_REQUIRED=NO"         >> ios/Flutter/Release.xcconfig
+              echo "DEVELOPMENT_TEAM="               >> ios/Flutter/Release.xcconfig
               echo "PROVISIONING_PROFILE_SPECIFIER=" >> ios/Flutter/Release.xcconfig
-              
-              # 3. On va dans le dossier ios et on compile DIRECTEMENT avec Xcode
+
+              # 4. Build direct avec xcodebuild, tous les flags signing désactivés
               cd ios
-              xcodebuild -workspace Runner.xcworkspace \
+              xcodebuild \
+                -workspace Runner.xcworkspace \
                 -scheme Runner \
                 -configuration Release \
                 -destination 'generic/platform=iOS' \
@@ -214,18 +218,19 @@ jobs:
                 CODE_SIGNING_ALLOWED=NO \
                 CODE_SIGNING_REQUIRED=NO \
                 CODE_SIGNING_IDENTITY="" \
+                CODE_SIGN_STYLE=Manual \
+                DEVELOPMENT_TEAM="" \
                 PROVISIONING_PROFILE_SPECIFIER="" \
+                COMPILER_INDEX_STORE_ENABLE=NO \
                 -quiet build
             fi
-            # 4. On se remet dans le bon dossier pour que le reste du script trouve le .app
+
             cd "$GITHUB_WORKSPACE"
-            
-            # On réajuste le chemin pour que la création de l'IPA trouve le fichier au bon endroit
-            # (Vu qu'on a bypassé Flutter, le .app est dans DerivedData comme pour une app native)
+            # Le .app est dans DerivedData, on traite la suite comme un projet native
             PROJECT_TYPE="native"
             cd "$IOS_PATH"
+
           elif [ "$PROJECT_TYPE" = "reactnative" ] || [ "$PROJECT_TYPE" = "expo" ]; then
-            # Use xcodebuild directly for React Native/Expo
             echo "Building React Native iOS ($CONFIGURATION)..."
             BUILD_CMD="xcodebuild"
             if [ -n "$WORKSPACE" ]; then
@@ -234,7 +239,6 @@ jobs:
               BUILD_CMD="$BUILD_CMD -project $PROJECT"
             fi
 
-            # Auto-detect scheme from workspace name (e.g., MyApp.xcworkspace -> MyApp)
             if [ -n "$WORKSPACE" ]; then
               SCHEME=$(basename "$WORKSPACE" .xcworkspace)
             elif [ -n "$PROJECT" ]; then
@@ -251,6 +255,7 @@ jobs:
 
             echo "Running: $BUILD_CMD"
             eval $BUILD_CMD
+
           else
             BUILD_CMD="xcodebuild"
             if [ -n "$WORKSPACE" ]; then
@@ -263,22 +268,16 @@ jobs:
             BUILD_CMD="$BUILD_CMD -configuration $CONFIGURATION"
             BUILD_CMD="$BUILD_CMD -destination 'generic/platform=iOS'"
             BUILD_CMD="$BUILD_CMD -derivedDataPath $DERIVED_DATA_PATH"
-
-            # Speed optimization flags
             BUILD_CMD="$BUILD_CMD COMPILER_INDEX_STORE_ENABLE=NO"
             BUILD_CMD="$BUILD_CMD DEBUG_INFORMATION_FORMAT=dwarf"
             BUILD_CMD="$BUILD_CMD ONLY_ACTIVE_ARCH=YES"
-            BUILD_CMD="$BUILD_CMD -quiet"
-
-            # Xcode 16+ native compilation caching
             BUILD_CMD="$BUILD_CMD SWIFT_ENABLE_COMPILE_CACHE=YES"
             BUILD_CMD="$BUILD_CMD CLANG_ENABLE_COMPILE_CACHE=YES"
+            BUILD_CMD="$BUILD_CMD -quiet"
 
             if [ "$USE_SIGNING" = "true" ]; then
-              # For signed builds, use archive
               BUILD_CMD="$BUILD_CMD -archivePath ../build/App.xcarchive archive"
             else
-              # For unsigned builds, use faster 'build' action
               BUILD_CMD="$BUILD_CMD CODE_SIGNING_ALLOWED=NO build"
             fi
 
@@ -286,9 +285,9 @@ jobs:
             eval $BUILD_CMD
           fi
 
-          # Create IPA
+          # ── Création de l'IPA ──────────────────────────────────────────────
+
           if [ "$USE_SIGNING" = "true" ]; then
-            # For signed builds, use xcodebuild -exportArchive
             cd ..
             printf '%s\n' \
               '<?xml version="1.0" encoding="UTF-8"?>' \
@@ -301,21 +300,19 @@ jobs:
               '    <string>automatic</string>' \
               '</dict>' \
               '</plist>' > ExportOptions.plist
+
             xcodebuild -exportArchive \
               -archivePath build/App.xcarchive \
               -exportOptionsPlist ExportOptions.plist \
               -exportPath build/export
 
-            # Move IPA to expected location
             mv build/export/*.ipa "build/$BUILD_ID.ipa"
             echo "Created signed IPA: build/$BUILD_ID.ipa"
+
           else
-            # For unsigned builds, find .app and create IPA
             if [ "$PROJECT_TYPE" = "flutter" ]; then
-              # Flutter outputs to build/ios/iphoneos/
               APP_PATH=$(find "${GITHUB_WORKSPACE}/build/ios/iphoneos" -name "*.app" -type d | head -1)
             else
-              # Native and React Native/Expo use DerivedData
               APP_PATH=$(find "$DERIVED_DATA_PATH/Build/Products/${CONFIGURATION}-iphoneos" -name "*.app" -type d | head -1)
             fi
 
@@ -323,6 +320,7 @@ jobs:
               echo "Error: Could not find .app"
               exit 1
             fi
+
             echo "Found app at: $APP_PATH"
             cd ..
             mkdir -p build/Payload

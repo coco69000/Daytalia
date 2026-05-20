@@ -26,7 +26,7 @@ on:
         description: 'Build configuration (Debug is faster, Release for production)'
         required: false
         type: string
-        default: 'Release'
+        default: 'Debug'
       flutter_version:
         description: 'Flutter version to use (e.g., 3.24.0). Empty means latest stable.'
         required: false
@@ -194,19 +194,35 @@ jobs:
               echo "Building Flutter iOS Debug..."
               flutter build ios --debug --no-codesign
             else
-              echo "Building Flutter iOS Release..."
-              # On configure explicitement le projet Xcode pour interdire la signature
+              echo "Building Flutter iOS Release via xcodebuild..."
+              # 1. On prépare les fichiers, les assets et les plugins proprement
               flutter build ios --config-only --release
               
-              # On force la désactivation absolue au niveau de Xcode
+              # 2. On force la désactivation de la signature dans la config
               echo "CODE_SIGNING_ALLOWED=NO" >> ios/Flutter/Release.xcconfig
               echo "CODE_SIGNING_REQUIRED=NO" >> ios/Flutter/Release.xcconfig
               echo "DEVELOPMENT_TEAM=" >> ios/Flutter/Release.xcconfig
               echo "PROVISIONING_PROFILE_SPECIFIER=" >> ios/Flutter/Release.xcconfig
               
-              # On lance le vrai build final compilé de manière brute
-              flutter build ios --release --no-codesign
+              # 3. On va dans le dossier ios et on compile DIRECTEMENT avec Xcode
+              cd ios
+              xcodebuild -workspace Runner.xcworkspace \
+                -scheme Runner \
+                -configuration Release \
+                -destination 'generic/platform=iOS' \
+                -derivedDataPath "$DERIVED_DATA_PATH" \
+                CODE_SIGNING_ALLOWED=NO \
+                CODE_SIGNING_REQUIRED=NO \
+                CODE_SIGNING_IDENTITY="" \
+                PROVISIONING_PROFILE_SPECIFIER="" \
+                -quiet build
             fi
+            # 4. On se remet dans le bon dossier pour que le reste du script trouve le .app
+            cd "$GITHUB_WORKSPACE"
+            
+            # On réajuste le chemin pour que la création de l'IPA trouve le fichier au bon endroit
+            # (Vu qu'on a bypassé Flutter, le .app est dans DerivedData comme pour une app native)
+            PROJECT_TYPE="native"
             cd "$IOS_PATH"
           elif [ "$PROJECT_TYPE" = "reactnative" ] || [ "$PROJECT_TYPE" = "expo" ]; then
             # Use xcodebuild directly for React Native/Expo

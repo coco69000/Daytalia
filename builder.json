@@ -5,11 +5,9 @@
     "owner": "coco69000",
     "repo": "Daytalia"
   },
-  "ios": {
-    "path": "ios" 
-  },
+  "ios": {},
   "flutter": {
-    "version": "3.41.5",
+    "version": "\u000e",
     "watch": {}
   },
   "reactNative": {},

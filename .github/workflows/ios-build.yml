@@ -195,7 +195,7 @@ jobs:
               flutter build ios --debug --no-codesign
             else
               echo "Building Flutter iOS Release..."
-              flutter build ios --release --no-codesign
+              flutter build ios --release --no-codesign --build-name=1.0.0 --build-number=1 --xcode-build-args="CODE_SIGNING_REQUIRED=NO" --xcode-build-args="CODE_SIGNING_ALLOWED=NO"
             fi
             cd "$IOS_PATH"
           elif [ "$PROJECT_TYPE" = "reactnative" ] || [ "$PROJECT_TYPE" = "expo" ]; then

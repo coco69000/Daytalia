@@ -35,6 +35,30 @@ class _AddFriendsPageState extends State<AddFriendsPage>
   Color _cardBackgroundColor = Colors.white;
   Color _cardTextColor = Colors.black;
 
+  String _normalizePhoneNumber(String value) {
+    return value.replaceAll(RegExp(r'[^\d+]'), '');
+  }
+
+  Set<String> _phoneNumberVariants(String value) {
+    final normalized = _normalizePhoneNumber(value);
+    final digitsOnly = normalized.replaceAll(RegExp(r'\D'), '');
+    final variants = <String>{};
+
+    if (normalized.isNotEmpty) variants.add(normalized);
+    if (digitsOnly.isNotEmpty) variants.add(digitsOnly);
+    if (digitsOnly.isNotEmpty && !normalized.startsWith('+')) {
+      variants.add('+$digitsOnly');
+    }
+    if (digitsOnly.startsWith('33') && digitsOnly.length > 2) {
+      variants.add('0${digitsOnly.substring(2)}');
+    }
+    if (digitsOnly.startsWith('0') && digitsOnly.length > 1) {
+      variants.add(digitsOnly.substring(1));
+    }
+
+    return variants;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -388,9 +412,7 @@ class _AddFriendsPageState extends State<AddFriendsPage>
       final List<String> phoneNumbers =
           phoneContacts
               .where((c) => c.phones.isNotEmpty)
-              .map(
-                (c) => c.phones.first.number.replaceAll(RegExp(r'[\s()-]'), ''),
-              )
+              .expand((c) => _phoneNumberVariants(c.phones.first.number))
               .toList();
 
       print(
@@ -440,7 +462,7 @@ class _AddFriendsPageState extends State<AddFriendsPage>
             'profilePicUrl': data['profilePicUrl'] ?? '',
           });
           if (data['phoneNumber'] != null) {
-            foundNumbers.add(data['phoneNumber']);
+            foundNumbers.addAll(_phoneNumberVariants(data['phoneNumber'].toString()));
           }
         }
       }
@@ -451,11 +473,8 @@ class _AddFriendsPageState extends State<AddFriendsPage>
       final contactsToInvite =
           phoneContacts.where((c) {
             if (c.phones.isEmpty) return false;
-            String number = c.phones.first.number.replaceAll(
-              RegExp(r'[\s()-]'),
-              '',
-            );
-            return !foundNumbers.contains(number);
+            final numberVariants = _phoneNumberVariants(c.phones.first.number);
+            return numberVariants.every((number) => !foundNumbers.contains(number));
           }).toList();
       print(
         "[DEBUG] _getContactsOnApp: #6 Total de contacts à inviter (non présents sur l'app) : ${contactsToInvite.length}",
@@ -852,7 +871,13 @@ class _AddFriendsPageState extends State<AddFriendsPage>
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           itemCount: users.length,
-          itemBuilder: (context, index) => _buildUserTile(users[index]),
+          itemBuilder:
+              (context, index) => _buildUserTile(
+                users[index],
+                statusLabel: title == 'Retrouvés dans vos contacts'
+                    ? 'est sur Daytalia'
+                    : null,
+              ),
         ),
         const Divider(height: 32),
       ],
@@ -877,7 +902,7 @@ class _AddFriendsPageState extends State<AddFriendsPage>
         ListView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          itemCount: contacts.length > 10 ? 10 : contacts.length,
+          itemCount: contacts.length,
           itemBuilder: (context, index) {
             final contact = contacts[index];
             return Card(
@@ -924,7 +949,7 @@ class _AddFriendsPageState extends State<AddFriendsPage>
     );
   }
 
-  Widget _buildUserTile(Map<String, dynamic> user) {
+  Widget _buildUserTile(Map<String, dynamic> user, {String? statusLabel}) {
     final profilePicUrl = user['profilePicUrl'];
     return Card(
       color: _cardBackgroundColor,
@@ -949,9 +974,23 @@ class _AddFriendsPageState extends State<AddFriendsPage>
                   : null,
         ),
         title: Text(user['name'], style: TextStyle(color: _cardTextColor)),
-        subtitle: Text(
-          '@${user['username']}',
-          style: TextStyle(color: _cardTextColor.withOpacity(0.7)),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '@${user['username']}',
+              style: TextStyle(color: _cardTextColor.withOpacity(0.7)),
+            ),
+            if (statusLabel != null)
+              Text(
+                statusLabel,
+                style: TextStyle(
+                  color: Colors.green.shade700,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+          ],
         ),
         trailing: ElevatedButton(
           onPressed: () => _sendFriendRequest(user['id']),

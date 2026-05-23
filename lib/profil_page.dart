@@ -2593,9 +2593,9 @@ class _ProfilePageState extends State<ProfilePage> {
               ),
             ),
             ElevatedButton(
-              onPressed: () {
+              onPressed: () async {
                 Navigator.of(dialogContext).pop();
-                RestartWidget.restartApp(context);
+                await RestartWidget.restartApp(context);
               },
               child: const Text('Relancer maintenant'),
             ),

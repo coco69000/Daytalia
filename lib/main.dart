@@ -1,8 +1,10 @@
 // lib/main.dart
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'firebase_options.dart';
@@ -23,9 +25,9 @@ class RestartWidget extends StatefulWidget {
 
   const RestartWidget({super.key, required this.child});
 
-  static void restartApp(BuildContext context) {
+  static Future<void> restartApp(BuildContext context) async {
     final state = context.findAncestorStateOfType<_RestartWidgetState>();
-    state?._restartApp();
+    await state?._restartApp();
   }
 
   @override
@@ -34,8 +36,20 @@ class RestartWidget extends StatefulWidget {
 
 class _RestartWidgetState extends State<RestartWidget> {
   Key _childKey = UniqueKey();
+  static const MethodChannel _restartChannel = MethodChannel(
+    'daytalia/app_restart',
+  );
 
-  void _restartApp() {
+  Future<void> _restartApp() async {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      try {
+        await _restartChannel.invokeMethod<void>('restartApp');
+        return;
+      } catch (e) {
+        debugPrint('Impossible de relancer l’application via Android: $e');
+      }
+    }
+
     setState(() {
       _childKey = UniqueKey();
     });

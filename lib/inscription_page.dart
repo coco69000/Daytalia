@@ -554,8 +554,8 @@ class _InscriptionPageState extends State<InscriptionPage> {
     final subtitleColor =
         isDarkMode ? Colors.grey.shade400 : Colors.grey.shade600;
     final cardColor = isDarkMode ? Colors.grey.shade900 : Colors.white;
-    final btnColor = isDarkMode ? Colors.white : Colors.black87;
-    final btnTextColor = isDarkMode ? Colors.black : Colors.white;
+    final themeColor = Theme.of(context).colorScheme.primary;
+    final btnTextColor = Theme.of(context).colorScheme.onPrimary;
 
     return Container(
       constraints: const BoxConstraints(maxWidth: 520),
@@ -633,7 +633,7 @@ class _InscriptionPageState extends State<InscriptionPage> {
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
               ),
-              backgroundColor: btnColor,
+                backgroundColor: themeColor,
               foregroundColor: btnTextColor,
               elevation: 0,
             ),
@@ -683,8 +683,8 @@ class _InscriptionPageState extends State<InscriptionPage> {
     final subtitleColor =
         isDarkMode ? Colors.grey.shade400 : Colors.grey.shade600;
     final cardColor = isDarkMode ? Colors.grey.shade900 : Colors.white;
-    final btnColor = isDarkMode ? Colors.white : Colors.black87;
-    final btnTextColor = isDarkMode ? Colors.black : Colors.white;
+    final themeColor = Theme.of(context).colorScheme.primary;
+    final btnTextColor = Theme.of(context).colorScheme.onPrimary;
 
     return Container(
       constraints: const BoxConstraints(maxWidth: 520),
@@ -773,7 +773,7 @@ class _InscriptionPageState extends State<InscriptionPage> {
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
               ),
-              backgroundColor: btnColor,
+                backgroundColor: themeColor,
               foregroundColor: btnTextColor,
               elevation: 0,
             ),

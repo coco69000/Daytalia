@@ -7,18 +7,9 @@ jobs:
   build-ios:
     name: 🎉 iOS Build
     runs-on: macos-latest
-    env:
-      TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - name: ⬇️ Checkout repository
         uses: actions/checkout@v4
-
-      - name: ✅ Check Apple team ID
-        run: |
-          if [ -z "$TEAM_ID" ]; then
-            echo "APPLE_TEAM_ID secret is missing. Configure it in repository secrets before building iOS."
-            exit 1
-          fi
 
       - name: ⚙️ Setup Flutter
         uses: subosito/flutter-action@v2
@@ -34,8 +25,10 @@ jobs:
         working-directory: ios
 
       - name: 🏗️ Build iOS unsigned IPA
-        # On produit un binaire iOS brut, puis Sideloadly fera la signature finale sur Windows.
-        run: flutter build ios --release --no-codesign
+        # On compile directement avec Xcode pour obtenir un .app sans signature, puis Sideloadly fera la signature finale sur Windows.
+        run: |
+          cd ios
+          xcodebuild -workspace Runner.xcworkspace -scheme Runner -configuration Release -sdk iphoneos -derivedDataPath ../build/ios CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM=""
 
       - name: 📦 Prepare unsigned IPA
         run: |

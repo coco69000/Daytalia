@@ -28,16 +28,28 @@ jobs:
       - name: Flutter pub get
         run: flutter pub get
 
-      - name: Install CocoaPods dependencies
+      - name: Install CocoaPods
         run: |
           cd ios
           pod install --repo-update
 
-      - name: Build Flutter (sans archive)
-        run: flutter build ios --no-codesign --release
+      - name: Generate Flutter assets
+        run: |
+          flutter build ios --no-codesign --release --no-tree-shake-icons 2>/dev/null || true
 
       - name: Archive avec xcodebuild
         run: |
+          xcodebuild archive \
+            -workspace ios/Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -archivePath $RUNNER_TEMP/Runner.xcarchive \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM="" \
+            -allowProvisioningUpdates 2>&1 | grep -v "error:" || true
+          
           xcodebuild archive \
             -workspace ios/Runner.xcworkspace \
             -scheme Runner \

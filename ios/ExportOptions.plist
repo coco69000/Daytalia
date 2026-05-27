@@ -10,7 +10,7 @@
     <true/>
     <key>compileBitcode</key>
     <false/>
-    <key>signingCertificate</key>
-    <string>-</string>
+    <key>teamID</key>
+    <string></string>
 </dict>
 </plist>

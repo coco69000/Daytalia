@@ -617,7 +617,7 @@ class _InscriptionPageState extends State<InscriptionPage> {
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(16),
-                borderSide: BorderSide(color: btnColor),
+                borderSide: BorderSide(color: themeColor),
               ),
             ),
             initialCountryCode: 'FR',
@@ -754,7 +754,7 @@ class _InscriptionPageState extends State<InscriptionPage> {
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(16),
-                borderSide: BorderSide(color: btnColor),
+                borderSide: BorderSide(color: themeColor),
               ),
             ),
             initialCountryCode: 'FR',

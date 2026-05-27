@@ -33,18 +33,34 @@ jobs:
           cd ios
           pod install --repo-update
 
-      - name: Build IPA (non signé)
-        run: |
-          flutter build ipa --no-codesign \
-            --export-options-plist=ios/ExportOptions.plist
-        env:
-          CODE_SIGN_IDENTITY: ""
-          CODE_SIGNING_REQUIRED: "NO"
-          CODE_SIGNING_ALLOWED: "NO"
+      - name: Build Flutter (sans archive)
+        run: flutter build ios --no-codesign --release
 
-      - name: Upload IPA as artifact
+      - name: Archive avec xcodebuild
+        run: |
+          xcodebuild archive \
+            -workspace ios/Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -archivePath $RUNNER_TEMP/Runner.xcarchive \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM=""
+
+      - name: Exporter IPA
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath $RUNNER_TEMP/Runner.xcarchive \
+            -exportPath $RUNNER_TEMP/ipa \
+            -exportOptionsPlist ios/ExportOptions.plist \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: flutter-app-ipa
-          path: build/ios/ipa/*.ipa
+          path: ${{ runner.temp }}/ipa/*.ipa
           retention-days: 7

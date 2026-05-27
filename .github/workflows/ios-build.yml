@@ -29,26 +29,36 @@ jobs:
         run: flutter pub get
 
       - name: Désactiver Swift Package Manager
-        run: |
-          flutter config --no-enable-swift-package-manager
+        run: flutter config --no-enable-swift-package-manager
 
       - name: Install CocoaPods
         run: |
           cd ios
           pod install --repo-update
 
-      - name: Build IPA
+      - name: Archive avec xcodebuild
         run: |
-          flutter build ipa --no-codesign \
-            --export-options-plist=ios/ExportOptions.plist
-        env:
-          CODE_SIGN_IDENTITY: ""
-          CODE_SIGNING_REQUIRED: "NO"
-          CODE_SIGNING_ALLOWED: "NO"
+          xcodebuild archive \
+            -workspace ios/Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -archivePath $RUNNER_TEMP/Runner.xcarchive \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM=""
+
+      - name: Créer IPA manuellement depuis l'archive
+        run: |
+          mkdir -p $RUNNER_TEMP/ipa/Payload
+          cp -r "$RUNNER_TEMP/Runner.xcarchive/Products/Applications/Runner.app" \
+            "$RUNNER_TEMP/ipa/Payload/"
+          cd $RUNNER_TEMP/ipa
+          zip -r ../Runner.ipa Payload
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: flutter-app-ipa
-          path: build/ios/ipa/*.ipa
+          path: ${{ runner.temp }}/Runner.ipa
           retention-days: 7

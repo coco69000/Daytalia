@@ -21,30 +21,23 @@ jobs:
         run: flutter pub get
 
       - name: 📂 Update Pods
-        run: pod repo update
+        run: pod install --repo-update
         working-directory: ios
 
-      - name: 🏗️ Build iOS (Force Manual)
-        # On compile en mode debug car c'est le seul qui accepte de ne pas être signé
-        # Sideloadly s'occupera de la signature finale sur ton Windows.
-        run: |
-          flutter build ios --debug --no-codesign
-          cd ios
-          xcodebuild -workspace Runner.xcworkspace -scheme Runner -configuration Debug -sdk iphoneos AD_HOC_CODE_SIGNING_ALLOWED=YES CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO -derivedDataPath ../build/ios
-        env:
-          CODE_SIGNING_ALLOWED: "NO"
-          CODE_SIGNING_REQUIRED: "NO"
+      - name: 🏗️ Build iOS unsigned IPA
+        # On produit un binaire iOS brut, puis Sideloadly fera la signature finale sur Windows.
+        run: flutter build ios --release --no-codesign
 
-      - name: 📦 Prepare IPA (Payload)
+      - name: 📦 Prepare unsigned IPA
         run: |
+          rm -rf Payload Daytalia.ipa
           mkdir -p Payload
-          # On cherche le binaire .app généré
-          find build/ios -name "Runner.app" -exec cp -r {} Payload/ \;
-          zip -qq -r -9 Daytalia.ipa Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          zip -qry Daytalia-unsigned.ipa Payload
 
       - name: 🚀 Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Daytalia-IPA
-          path: Daytalia.ipa
+          name: Daytalia-unsigned-ipa
+          path: Daytalia-unsigned.ipa
           retention-days: 3

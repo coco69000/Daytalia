@@ -25,10 +25,8 @@ jobs:
         working-directory: ios
 
       - name: 🏗️ Build iOS unsigned IPA
-        # On compile directement avec Xcode pour obtenir un .app sans signature, puis Sideloadly fera la signature finale sur Windows.
-        run: |
-          cd ios
-          xcodebuild -workspace Runner.xcworkspace -scheme Runner -configuration Release -sdk iphoneos -derivedDataPath ../build/ios CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM=""
+        # Flutter reconstruit automatiquement le lien natif avec les Pods/Firebase avant de produire le .app.
+        run: flutter build ios --debug --no-codesign
 
       - name: 📦 Prepare unsigned IPA
         run: |

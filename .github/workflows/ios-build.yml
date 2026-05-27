@@ -1,71 +1,22 @@
-name: Build Flutter iOS IPA
-
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:
-
+name: Build iOS IPA
+on: [push]
 jobs:
   build:
     runs-on: macos-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Xcode
-        uses: maxim-lobanov/setup-xcode@v1
+      - uses: actions/checkout@v3
+      - uses: subosito/flutter-action@v2
         with:
-          xcode-version: latest-stable
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
+          channel: 'stable'
+      - run: flutter pub get
+      - run: flutter build ios --release --no-codesign
+      - name: Create IPA
+        run: |
+          mkdir Payload
+          cp -r build/ios/iphoneos/Runner.app Payload
+          zip -r app.ipa Payload
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v3
         with:
-          flutter-version: '3.x'
-          channel: stable
-          cache: true
-
-      - name: Flutter pub get
-        run: flutter pub get
-
-      - name: Désactiver Swift Package Manager
-        run: flutter config --no-enable-swift-package-manager
-
-      - name: Install CocoaPods
-        run: |
-          cd ios
-          pod install --repo-update
-
-      - name: Préparer les fichiers Flutter
-        run: |
-          flutter build ios --no-codesign --release
-        continue-on-error: true
-
-      - name: Archive avec xcodebuild
-        run: |
-          xcodebuild archive \
-            -workspace ios/Runner.xcworkspace \
-            -scheme Runner \
-            -configuration Release \
-            -archivePath $RUNNER_TEMP/Runner.xcarchive \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            DEVELOPMENT_TEAM="" \
-            FLUTTER_BUILD_MODE=release \
-            FLUTTER_ROOT=$FLUTTER_ROOT
-
-      - name: Créer IPA manuellement depuis l'archive
-        run: |
-          mkdir -p $RUNNER_TEMP/ipa/Payload
-          cp -r "$RUNNER_TEMP/Runner.xcarchive/Products/Applications/Runner.app" \
-            "$RUNNER_TEMP/ipa/Payload/"
-          cd $RUNNER_TEMP/ipa
-          zip -r ../Runner.ipa Payload
-
-      - name: Upload IPA
-        uses: actions/upload-artifact@v4
-        with:
-          name: flutter-app-ipa
-          path: ${{ runner.temp }}/Runner.ipa
-          retention-days: 7
+          name: release-ipa
+          path: app.ipa

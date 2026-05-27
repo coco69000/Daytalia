@@ -28,51 +28,27 @@ jobs:
       - name: Flutter pub get
         run: flutter pub get
 
+      - name: Désactiver Swift Package Manager
+        run: |
+          flutter config --no-enable-swift-package-manager
+
       - name: Install CocoaPods
         run: |
           cd ios
           pod install --repo-update
 
-      - name: Generate Flutter assets
+      - name: Build IPA
         run: |
-          flutter build ios --no-codesign --release --no-tree-shake-icons 2>/dev/null || true
-
-      - name: Archive avec xcodebuild
-        run: |
-          xcodebuild archive \
-            -workspace ios/Runner.xcworkspace \
-            -scheme Runner \
-            -configuration Release \
-            -archivePath $RUNNER_TEMP/Runner.xcarchive \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            DEVELOPMENT_TEAM="" \
-            -allowProvisioningUpdates 2>&1 | grep -v "error:" || true
-          
-          xcodebuild archive \
-            -workspace ios/Runner.xcworkspace \
-            -scheme Runner \
-            -configuration Release \
-            -archivePath $RUNNER_TEMP/Runner.xcarchive \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            DEVELOPMENT_TEAM=""
-
-      - name: Exporter IPA
-        run: |
-          xcodebuild -exportArchive \
-            -archivePath $RUNNER_TEMP/Runner.xcarchive \
-            -exportPath $RUNNER_TEMP/ipa \
-            -exportOptionsPlist ios/ExportOptions.plist \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO
+          flutter build ipa --no-codesign \
+            --export-options-plist=ios/ExportOptions.plist
+        env:
+          CODE_SIGN_IDENTITY: ""
+          CODE_SIGNING_REQUIRED: "NO"
+          CODE_SIGNING_ALLOWED: "NO"
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: flutter-app-ipa
-          path: ${{ runner.temp }}/ipa/*.ipa
+          path: build/ios/ipa/*.ipa
           retention-days: 7

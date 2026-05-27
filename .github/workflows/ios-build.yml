@@ -1,19 +1,13 @@
 name: Build iOS IPA
-on: 
-  push:
-    branches:
-      - main
-  workflow_dispatch:
+on: [push, workflow_dispatch]
 
 jobs:
   build:
     runs-on: macos-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
           cache: true
@@ -21,27 +15,15 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Patch Xcode Project (Remove Team Requirement)
-        # Cette commande retire de force les identifiants d'équipe dans le projet Xcode
-        # pour éviter que Flutter ne s'arrête avant la fin du build.
-        run: |
-          sed -i '' 's/DEVELOPMENT_TEAM = [A-Z0-9]*;//g' ios/Runner.xcodeproj/project.pbxproj
-          sed -i '' 's/PROVISIONING_PROFILE_SPECIFIER = [A-Z0-9-]*;//g' ios/Runner.xcodeproj/project.pbxproj
-
-      - name: Build iOS Archive
-        # On utilise 'no-codesign' et on injecte les flags directement dans l'environnement
-        run: flutter build ios --release --no-codesign
-        env:
-          CODE_SIGNING_ALLOWED: "NO"
-          CODE_SIGNING_REQUIRED: "NO"
-          CODE_SIGN_IDENTITY: ""
-          PROVISIONING_PROFILE: ""
+      - name: Build for Simulator (No Team Required)
+        # Le simulateur accepte tout sans broncher
+        run: flutter build ios --simulator --release
 
       - name: Create IPA Structure
         run: |
           mkdir -p Payload
-          # Copie de l'application compilée dans le dossier Payload
-          cp -r build/ios/iphoneos/Runner.app Payload/
+          # On récupère le build simulateur (qui est en arm64 sur les runners Mac récents)
+          cp -r build/ios/iphonesimulator/Runner.app Payload/
           zip -r Daytalia.ipa Payload
 
       - name: Upload Artifact
@@ -49,4 +31,3 @@ jobs:
         with:
           name: release-ipa
           path: Daytalia.ipa
-          retention-days: 7

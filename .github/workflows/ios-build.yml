@@ -1,22 +1,28 @@
 name: Build iOS IPA
-on: [push]
+on: [push, workflow_dispatch]
+
 jobs:
   build:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4 # Mis à jour de v3 à v4
+
       - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+          
       - run: flutter pub get
+      
       - run: flutter build ios --release --no-codesign
+
       - name: Create IPA
         run: |
           mkdir Payload
           cp -r build/ios/iphoneos/Runner.app Payload
           zip -r app.ipa Payload
+
       - name: Upload Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4 # C'est ici que ça bloquait (v3 -> v4)
         with:
           name: release-ipa
           path: app.ipa

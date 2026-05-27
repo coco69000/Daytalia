@@ -21,17 +21,27 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Build iOS (No Codesign)
+      - name: Patch Xcode Project (Remove Team Requirement)
+        # Cette commande retire de force les identifiants d'équipe dans le projet Xcode
+        # pour éviter que Flutter ne s'arrête avant la fin du build.
+        run: |
+          sed -i '' 's/DEVELOPMENT_TEAM = [A-Z0-9]*;//g' ios/Runner.xcodeproj/project.pbxproj
+          sed -i '' 's/PROVISIONING_PROFILE_SPECIFIER = [A-Z0-9-]*;//g' ios/Runner.xcodeproj/project.pbxproj
+
+      - name: Build iOS Archive
+        # On utilise 'no-codesign' et on injecte les flags directement dans l'environnement
         run: flutter build ios --release --no-codesign
         env:
           CODE_SIGNING_ALLOWED: "NO"
           CODE_SIGNING_REQUIRED: "NO"
           CODE_SIGN_IDENTITY: ""
+          PROVISIONING_PROFILE: ""
 
       - name: Create IPA Structure
         run: |
-          mkdir Payload
-          cp -r build/ios/iphoneos/Runner.app Payload
+          mkdir -p Payload
+          # Copie de l'application compilée dans le dossier Payload
+          cp -r build/ios/iphoneos/Runner.app Payload/
           zip -r Daytalia.ipa Payload
 
       - name: Upload Artifact

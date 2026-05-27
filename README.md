@@ -5,7 +5,7 @@ A new Flutter project.
 ## iOS build
 
 The GitHub Actions workflow in `.github/workflows/ios-build.yml` generates an unsigned iOS IPA artifact.
-Download the artifact from Actions, then import the IPA into Sideloadly on Windows to sign and install it on your iPhone.
+Set the `APPLE_TEAM_ID` secret in GitHub Actions, then download the artifact from Actions and import the IPA into Sideloadly on Windows to sign and install it on your iPhone.
 
 ## Getting Started
 

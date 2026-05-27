@@ -7,9 +7,18 @@ jobs:
   build-ios:
     name: 🎉 iOS Build
     runs-on: macos-latest
+    env:
+      TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - name: ⬇️ Checkout repository
         uses: actions/checkout@v4
+
+      - name: ✅ Check Apple team ID
+        run: |
+          if [ -z "$TEAM_ID" ]; then
+            echo "APPLE_TEAM_ID secret is missing. Configure it in repository secrets before building iOS."
+            exit 1
+          fi
 
       - name: ⚙️ Setup Flutter
         uses: subosito/flutter-action@v2

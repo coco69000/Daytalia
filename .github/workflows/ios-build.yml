@@ -1,45 +1,16 @@
-name: iOS Build
+name: Build Flutter iOS IPA
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
-    inputs:
-      build_id:
-        description: 'Unique build identifier'
-        required: true
-        type: string
-      ios_path:
-        description: 'Path to iOS project (e.g., "ios" for React Native)'
-        required: false
-        type: string
-        default: '.'
-      scheme:
-        description: 'Xcode scheme to build (auto-detected if empty)'
-        required: false
-        type: string
-        default: ''
-      use_signing:
-        description: 'Enable code signing (requires secrets to be configured)'
-        required: false
-        type: boolean
-        default: false
-      configuration:
-        description: 'Build configuration (Debug is faster, Release for production)'
-        required: false
-        type: string
-        default: 'Release'
-      flutter_version:
-        description: 'Flutter version to use (e.g., 3.24.0). Empty means latest stable.'
-        required: false
-        type: string
-        default: ''
 
 jobs:
   build:
     runs-on: macos-latest
-    timeout-minutes: 30
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Xcode
@@ -47,357 +18,33 @@ jobs:
         with:
           xcode-version: latest-stable
 
-      - name: Restore DerivedData cache
-        uses: actions/cache/restore@v4
-        id: cache-deriveddata
-        with:
-          path: DerivedData
-          key: deriveddata-${{ github.run_id }}
-          restore-keys: |
-            deriveddata-
-
-      - name: Detect project type
-        id: detect
-        run: |
-          if [ -f "pubspec.yaml" ]; then
-            echo "type=flutter" >> $GITHUB_OUTPUT
-          elif [ -f "package.json" ] && grep -q '"expo"' package.json; then
-            echo "type=expo" >> $GITHUB_OUTPUT
-          elif [ -f "package.json" ] && grep -q '"react-native"' package.json; then
-            echo "type=reactnative" >> $GITHUB_OUTPUT
-          else
-            echo "type=native" >> $GITHUB_OUTPUT
-          fi
-
       - name: Setup Flutter
-        if: steps.detect.outputs.type == 'flutter'
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: ${{ inputs.flutter_version || '' }}
+          flutter-version: '3.x'
           channel: stable
           cache: true
 
       - name: Flutter pub get
-        if: steps.detect.outputs.type == 'flutter'
         run: flutter pub get
 
-      - name: Setup Node.js
-        if: steps.detect.outputs.type == 'reactnative' || steps.detect.outputs.type == 'expo'
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Restore node_modules cache
-        if: steps.detect.outputs.type == 'reactnative' || steps.detect.outputs.type == 'expo'
-        uses: actions/cache@v4
-        id: node-modules-cache
-        with:
-          path: node_modules
-          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json', 'yarn.lock') }}
-          restore-keys: |
-            node-modules-${{ runner.os }}-
-
-      - name: Install npm dependencies
-        if: (steps.detect.outputs.type == 'reactnative' || steps.detect.outputs.type == 'expo') && steps.node-modules-cache.outputs.cache-hit != 'true'
-        run: npm install
-
-      - name: Restore Pods cache
-        uses: actions/cache@v4
-        id: pods-cache
-        with:
-          path: |
-            ${{ inputs.ios_path }}/Pods
-            ~/.cocoapods/repos
-          key: pods-${{ runner.os }}-${{ hashFiles(format('{0}/Podfile.lock', inputs.ios_path)) }}
-          restore-keys: |
-            pods-${{ runner.os }}-
-
-      - name: Install certificate and provisioning profile
-        if: inputs.use_signing
-        env:
-          IOS_CERTIFICATE: ${{ secrets.IOS_CERTIFICATE }}
-          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
-          IOS_PROVISIONING_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
+      - name: Install CocoaPods dependencies
         run: |
-          set -e
+          cd ios
+          pod install --repo-update
 
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
-
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-
-          CERTIFICATE_PATH=$RUNNER_TEMP/certificate.p12
-          echo "$IOS_CERTIFICATE" | base64 --decode > "$CERTIFICATE_PATH"
-          security import "$CERTIFICATE_PATH" -P "$IOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
-          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security list-keychain -d user -s "$KEYCHAIN_PATH"
-
-          PROFILE_PATH=$RUNNER_TEMP/profile.mobileprovision
-          echo "$IOS_PROVISIONING_PROFILE" | base64 --decode > "$PROFILE_PATH"
-
-          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-          PROFILE_UUID=$(security cms -D -i "$PROFILE_PATH" | plutil -extract UUID raw -)
-          cp "$PROFILE_PATH" ~/Library/MobileDevice/Provisioning\ Profiles/"$PROFILE_UUID".mobileprovision
-
-          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> $GITHUB_ENV
-          echo "Certificate and provisioning profile installed"
-
-      - name: Build IPA
-        env:
-          BUILD_ID: ${{ inputs.build_id }}
-          IOS_PATH: ${{ inputs.ios_path }}
-          SCHEME: ${{ inputs.scheme }}
-          PROJECT_TYPE: ${{ steps.detect.outputs.type }}
-          USE_SIGNING: ${{ inputs.use_signing }}
-          CONFIGURATION: ${{ inputs.configuration }}
+      - name: Build IPA (non signé)
         run: |
-          set -e
+          flutter build ipa --no-codesign \
+            --export-options-plist=ios/ExportOptions.plist
+        env:
+          CODE_SIGN_IDENTITY: ""
+          CODE_SIGNING_REQUIRED: "NO"
+          CODE_SIGNING_ALLOWED: "NO"
 
-          cd "$IOS_PATH"
-
-          WORKSPACE=$(find . -maxdepth 1 -name "*.xcworkspace" | head -1)
-          PROJECT=$(find . -maxdepth 1 -name "*.xcodeproj" | head -1)
-
-          if [ -f "Podfile" ]; then
-            echo "Running pod install..."
-            pod install
-            WORKSPACE=$(find . -maxdepth 1 -name "*.xcworkspace" | head -1)
-          fi
-
-          if [ -z "$SCHEME" ] && [ "$PROJECT_TYPE" = "native" ]; then
-            if [ -n "$WORKSPACE" ]; then
-              SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list 2>/dev/null | grep -A 100 "Schemes:" | tail -n +2 | grep -v -E "^[[:space:]]*Pods-" | head -1 | xargs)
-              if [ -z "$SCHEME" ]; then
-                SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list 2>/dev/null | grep -A 100 "Schemes:" | tail -n +2 | head -1 | xargs)
-              fi
-            elif [ -n "$PROJECT" ]; then
-              SCHEME=$(xcodebuild -project "$PROJECT" -list 2>/dev/null | grep -A 100 "Schemes:" | tail -n +2 | head -1 | xargs)
-            fi
-            echo "Building with scheme: $SCHEME (configuration: $CONFIGURATION)"
-          fi
-
-          DERIVED_DATA_PATH="${GITHUB_WORKSPACE}/DerivedData"
-
-          # ✅ On mémorise le type original AVANT de le modifier
-          ORIGINAL_PROJECT_TYPE="$PROJECT_TYPE"
-
-          if [ "$PROJECT_TYPE" = "flutter" ]; then
-            cd "$GITHUB_WORKSPACE"
-
-            if [ "$CONFIGURATION" = "Debug" ]; then
-              echo "Building Flutter iOS Debug..."
-              flutter build ios --debug --no-codesign
-            else
-              echo "Building Flutter iOS Release via xcodebuild..."
-
-              # 1. Générer les fichiers de config Flutter (plugins, assets, etc.)
-              flutter build ios --config-only --release || true
-
-              # 2. Patcher le pbxproj pour forcer le signing en Manual
-              sed -i '' \
-                -e 's/DEVELOPMENT_TEAM = [^;]*;/DEVELOPMENT_TEAM = "";/g' \
-                -e 's/CODE_SIGN_STYLE = Automatic;/CODE_SIGN_STYLE = Manual;/g' \
-                -e 's/ProvisioningStyle = Automatic;/ProvisioningStyle = Manual;/g' \
-                ios/Runner.xcodeproj/project.pbxproj
-
-              # 3. Écrire les xcconfig APRÈS le --config-only (qui les écrase)
-              echo "CODE_SIGNING_ALLOWED=NO"          >> ios/Flutter/Release.xcconfig
-              echo "CODE_SIGNING_REQUIRED=NO"         >> ios/Flutter/Release.xcconfig
-              echo "DEVELOPMENT_TEAM="               >> ios/Flutter/Release.xcconfig
-              echo "PROVISIONING_PROFILE_SPECIFIER=" >> ios/Flutter/Release.xcconfig
-
-              # 4. ✅ FIX pod install : installer les pods APRÈS --config-only
-              #    (--config-only regénère GeneratedPluginRegistrant.m qui référence
-              #    cloud_firestore, firebase_auth, etc. — sans pod install ces frameworks
-              #    ne sont pas liés et xcodebuild échoue avec "Module not found")
-              echo "Running pod install..."
-              cd ios
-              pod install
-              cd "$GITHUB_WORKSPACE"
-
-              # 5. Build direct avec xcodebuild, tous les flags signing désactivés
-              cd ios
-              xcodebuild \
-                -workspace Runner.xcworkspace \
-                -scheme Runner \
-                -configuration Release \
-                -destination 'generic/platform=iOS' \
-                -derivedDataPath "$DERIVED_DATA_PATH" \
-                CODE_SIGNING_ALLOWED=NO \
-                CODE_SIGNING_REQUIRED=NO \
-                CODE_SIGNING_IDENTITY="" \
-                CODE_SIGN_STYLE=Manual \
-                DEVELOPMENT_TEAM="" \
-                PROVISIONING_PROFILE_SPECIFIER="" \
-                COMPILER_INDEX_STORE_ENABLE=NO \
-                -quiet build
-            fi
-
-            cd "$GITHUB_WORKSPACE"
-            # On réassigne PROJECT_TYPE pour la section IPA (native paths)
-            # mais ORIGINAL_PROJECT_TYPE garde "flutter" pour choisir le bon APP_PATH
-            PROJECT_TYPE="native"
-            cd "$IOS_PATH"
-
-          elif [ "$PROJECT_TYPE" = "reactnative" ] || [ "$PROJECT_TYPE" = "expo" ]; then
-            echo "Building React Native iOS ($CONFIGURATION)..."
-            BUILD_CMD="xcodebuild"
-            if [ -n "$WORKSPACE" ]; then
-              BUILD_CMD="$BUILD_CMD -workspace $WORKSPACE"
-            elif [ -n "$PROJECT" ]; then
-              BUILD_CMD="$BUILD_CMD -project $PROJECT"
-            fi
-
-            if [ -n "$WORKSPACE" ]; then
-              SCHEME=$(basename "$WORKSPACE" .xcworkspace)
-            elif [ -n "$PROJECT" ]; then
-              SCHEME=$(basename "$PROJECT" .xcodeproj)
-            fi
-
-            BUILD_CMD="$BUILD_CMD -scheme $SCHEME"
-            BUILD_CMD="$BUILD_CMD -configuration $CONFIGURATION"
-            BUILD_CMD="$BUILD_CMD -destination 'generic/platform=iOS'"
-            BUILD_CMD="$BUILD_CMD -derivedDataPath $DERIVED_DATA_PATH"
-            BUILD_CMD="$BUILD_CMD CODE_SIGNING_ALLOWED=NO"
-            BUILD_CMD="$BUILD_CMD COMPILER_INDEX_STORE_ENABLE=NO"
-            BUILD_CMD="$BUILD_CMD -quiet build"
-
-            echo "Running: $BUILD_CMD"
-            eval $BUILD_CMD
-
-          else
-            BUILD_CMD="xcodebuild"
-            if [ -n "$WORKSPACE" ]; then
-              BUILD_CMD="$BUILD_CMD -workspace $WORKSPACE"
-            elif [ -n "$PROJECT" ]; then
-              BUILD_CMD="$BUILD_CMD -project $PROJECT"
-            fi
-
-            BUILD_CMD="$BUILD_CMD -scheme $SCHEME"
-            BUILD_CMD="$BUILD_CMD -configuration $CONFIGURATION"
-            BUILD_CMD="$BUILD_CMD -destination 'generic/platform=iOS'"
-            BUILD_CMD="$BUILD_CMD -derivedDataPath $DERIVED_DATA_PATH"
-            BUILD_CMD="$BUILD_CMD COMPILER_INDEX_STORE_ENABLE=NO"
-            BUILD_CMD="$BUILD_CMD DEBUG_INFORMATION_FORMAT=dwarf"
-            BUILD_CMD="$BUILD_CMD ONLY_ACTIVE_ARCH=YES"
-            BUILD_CMD="$BUILD_CMD SWIFT_ENABLE_COMPILE_CACHE=YES"
-            BUILD_CMD="$BUILD_CMD CLANG_ENABLE_COMPILE_CACHE=YES"
-            BUILD_CMD="$BUILD_CMD -quiet"
-
-            if [ "$USE_SIGNING" = "true" ]; then
-              BUILD_CMD="$BUILD_CMD -archivePath ../build/App.xcarchive archive"
-            else
-              BUILD_CMD="$BUILD_CMD CODE_SIGNING_ALLOWED=NO build"
-            fi
-
-            echo "Running: $BUILD_CMD"
-            eval $BUILD_CMD
-          fi
-
-          # ── Création de l'IPA ──────────────────────────────────────────────
-
-          if [ "$USE_SIGNING" = "true" ]; then
-            cd ..
-            printf '%s\n' \
-              '<?xml version="1.0" encoding="UTF-8"?>' \
-              '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
-              '<plist version="1.0">' \
-              '<dict>' \
-              '    <key>method</key>' \
-              '    <string>development</string>' \
-              '    <key>signingStyle</key>' \
-              '    <string>automatic</string>' \
-              '</dict>' \
-              '</plist>' > ExportOptions.plist
-
-            xcodebuild -exportArchive \
-              -archivePath build/App.xcarchive \
-              -exportOptionsPlist ExportOptions.plist \
-              -exportPath build/export
-
-            mv build/export/*.ipa "build/$BUILD_ID.ipa"
-            echo "Created signed IPA: build/$BUILD_ID.ipa"
-
-          else
-            # ✅ FIX APP_PATH : on utilise ORIGINAL_PROJECT_TYPE (pas PROJECT_TYPE
-            #    qui a été réécrasé à "native" après le build Flutter) pour savoir
-            #    où chercher le .app.
-            #    Flutter + xcodebuild direct → .app dans DerivedData (pas build/ios/iphoneos)
-            if [ "$ORIGINAL_PROJECT_TYPE" = "flutter" ]; then
-              APP_PATH=$(find "$DERIVED_DATA_PATH/Build/Products/${CONFIGURATION}-iphoneos" -name "*.app" -type d | head -1)
-              # Fallback au cas où xcodebuild a mis le .app ailleurs dans DerivedData
-              if [ -z "$APP_PATH" ]; then
-                APP_PATH=$(find "$DERIVED_DATA_PATH" -name "*.app" -type d \
-                  ! -path "*/PlugIns/*" ! -path "*/Watch/*" | head -1)
-              fi
-            else
-              APP_PATH=$(find "$DERIVED_DATA_PATH/Build/Products/${CONFIGURATION}-iphoneos" -name "*.app" -type d | head -1)
-            fi
-
-            if [ -z "$APP_PATH" ]; then
-              echo "❌ Error: Could not find .app in DerivedData"
-              echo "Contents of DerivedData/Build/Products:"
-              find "$DERIVED_DATA_PATH/Build/Products" -maxdepth 2 -type d 2>/dev/null || echo "(empty)"
-              exit 1
-            fi
-
-            echo "✅ Found app at: $APP_PATH"
-            cd "$GITHUB_WORKSPACE"
-            mkdir -p build/Payload
-            cp -R "$APP_PATH" build/Payload/
-            cd build
-            zip -rq "$BUILD_ID.ipa" Payload
-            rm -rf Payload
-            echo "✅ Created unsigned IPA: build/$BUILD_ID.ipa"
-          fi
-
-      - name: Upload IPA artifact
+      - name: Upload IPA as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ipa
-          path: build/*.ipa
+          name: flutter-app-ipa
+          path: build/ios/ipa/*.ipa
           retention-days: 7
-          if-no-files-found: error
-          compression-level: 6
-          overwrite: false
-          include-hidden-files: false
-
-      - name: Save DerivedData cache
-        uses: actions/cache/save@v4
-        if: always()
-        with:
-          path: DerivedData
-          key: deriveddata-${{ github.run_id }}
-
-      - name: Cleanup signing
-        if: always() && inputs.use_signing
-        run: |
-          if [ -n "$KEYCHAIN_PATH" ] && [ -f "$KEYCHAIN_PATH" ]; then
-            security delete-keychain "$KEYCHAIN_PATH" || true
-          fi
-
-      - name: Build summary
-        if: always()
-        env:
-          USE_SIGNING: ${{ inputs.use_signing }}
-          CONFIGURATION: ${{ inputs.configuration }}
-        run: |
-          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Build ID:** ${{ inputs.build_id }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Configuration:** $CONFIGURATION" >> $GITHUB_STEP_SUMMARY
-          echo "- **DerivedData Cache:** ${{ steps.cache-deriveddata.outputs.cache-hit == 'true' && 'Hit' || 'Miss' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Pods Cache:** ${{ steps.pods-cache.outputs.cache-hit == 'true' && 'Hit' || 'Miss' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Node Modules Cache:** ${{ steps.node-modules-cache.outputs.cache-hit == 'true' && 'Hit' || 'N/A' }}" >> $GITHUB_STEP_SUMMARY
-          if [ "$USE_SIGNING" = "true" ]; then
-            echo "- **Signing:** Signed (development)" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "- **Signing:** Unsigned (sign locally with AltStore/Sideloadly)" >> $GITHUB_STEP_SUMMARY
-          fi
-          IPA_PATH=$(find build -name "*.ipa" -type f 2>/dev/null | head -1)
-          if [ -n "$IPA_PATH" ]; then
-            echo "- **IPA Size:** $(ls -lh "$IPA_PATH" | awk '{print $5}')" >> $GITHUB_STEP_SUMMARY
-          fi

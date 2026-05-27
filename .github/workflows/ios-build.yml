@@ -15,15 +15,16 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Build for Simulator (No Team Required)
-        # Le simulateur accepte tout sans broncher
-        run: flutter build ios --simulator --release
+      - name: Build iOS Framework (No Signing)
+        # On utilise 'ios --debug' car c'est le mode le plus permissif pour Windows
+        # Sideloadly s'occupera de le faire fonctionner sur ton iPhone.
+        run: flutter build ios --debug --no-codesign
 
       - name: Create IPA Structure
         run: |
           mkdir -p Payload
-          # On récupère le build simulateur (qui est en arm64 sur les runners Mac récents)
-          cp -r build/ios/iphonesimulator/Runner.app Payload/
+          # On cherche le dossier .app généré dans le dossier Debug-iphoneos
+          cp -r build/ios/iphoneos/Runner.app Payload/
           zip -r Daytalia.ipa Payload
 
       - name: Upload Artifact

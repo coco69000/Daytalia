@@ -31,15 +31,15 @@ jobs:
       - name: Désactiver Swift Package Manager
         run: flutter config --no-enable-swift-package-manager
 
-      - name: Patcher le signing dans pbxproj
-        run: |
-          sed -i '' 's/DEVELOPMENT_TEAM = "$(TEAM_ID)"/DEVELOPMENT_TEAM = ""/g' ios/Runner.xcodeproj/project.pbxproj
-          sed -i '' 's/"CODE_SIGN_IDENTITY\[sdk=iphoneos\*\]" = "iPhone Developer"/"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = ""/g' ios/Runner.xcodeproj/project.pbxproj
-
       - name: Install CocoaPods
         run: |
           cd ios
           pod install --repo-update
+
+      - name: Préparer les fichiers Flutter
+        run: |
+          flutter build ios --no-codesign --release
+        continue-on-error: true
 
       - name: Archive avec xcodebuild
         run: |
@@ -51,9 +51,11 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            DEVELOPMENT_TEAM=""
+            DEVELOPMENT_TEAM="" \
+            FLUTTER_BUILD_MODE=release \
+            FLUTTER_ROOT=$FLUTTER_ROOT
 
-      - name: Créer IPA manuellement
+      - name: Créer IPA manuellement depuis l'archive
         run: |
           mkdir -p $RUNNER_TEMP/ipa/Payload
           cp -r "$RUNNER_TEMP/Runner.xcarchive/Products/Applications/Runner.app" \

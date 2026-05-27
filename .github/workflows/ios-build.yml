@@ -2,8 +2,8 @@ name: Build iOS IPA
 on: 
   push:
     branches:
-      - main # Vérifie que ta branche principale s'appelle bien 'main'
-  workflow_dispatch: # Te permet de lancer le build manuellement depuis l'onglet Actions
+      - main
+  workflow_dispatch:
 
 jobs:
   build:
@@ -16,26 +16,27 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
-          cache: true # Accélère les prochains builds
+          cache: true
 
       - name: Install dependencies
         run: flutter pub get
 
       - name: Build iOS (No Codesign)
-        # On force Xcode à ignorer la signature pour éviter l'erreur "Development Team"
-        run: flutter build ios --release --no-codesign --xcargs "CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO"
+        run: flutter build ios --release --no-codesign
+        env:
+          CODE_SIGNING_ALLOWED: "NO"
+          CODE_SIGNING_REQUIRED: "NO"
+          CODE_SIGN_IDENTITY: ""
 
       - name: Create IPA Structure
-        # On crée manuellement le dossier Payload pour simuler un vrai package IPA
         run: |
           mkdir Payload
           cp -r build/ios/iphoneos/Runner.app Payload
           zip -r Daytalia.ipa Payload
 
       - name: Upload Artifact
-        # On utilise la v4 pour éviter l'erreur de dépréciation
         uses: actions/upload-artifact@v4
         with:
           name: release-ipa
           path: Daytalia.ipa
-          retention-days: 7 # Le fichier sera supprimé après 7 jours pour gagner de la place
+          retention-days: 7

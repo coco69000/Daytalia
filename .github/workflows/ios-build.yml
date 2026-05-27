@@ -1,7 +1,7 @@
 name: iOS-ipa-build
 
 on:
-  workflow_dispatch: # On garde le déclenchement manuel
+  workflow_dispatch:
 
 jobs:
   build-ios:
@@ -9,7 +9,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: ⬇️ Checkout repository
-        uses: actions/checkout@v4 # Version à jour
+        uses: actions/checkout@v4
 
       - name: ⚙️ Setup Flutter
         uses: subosito/flutter-action@v2
@@ -24,22 +24,27 @@ jobs:
         run: pod repo update
         working-directory: ios
 
-      - name: 🏗️ Build iOS
-        # On utilise --debug car c'est le plus sûr pour Sideloadly sur Windows
-        run: flutter build ios --debug --no-codesign
+      - name: 🏗️ Build iOS (Force Manual)
+        # On compile en mode debug car c'est le seul qui accepte de ne pas être signé
+        # Sideloadly s'occupera de la signature finale sur ton Windows.
+        run: |
+          flutter build ios --debug --no-codesign
+          cd ios
+          xcodebuild -workspace Runner.xcworkspace -scheme Runner -configuration Debug -sdk iphoneos AD_HOC_CODE_SIGNING_ALLOWED=YES CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO -derivedDataPath ../build/ios
         env:
           CODE_SIGNING_ALLOWED: "NO"
           CODE_SIGNING_REQUIRED: "NO"
 
       - name: 📦 Prepare IPA (Payload)
         run: |
-          mkdir Payload
-          cp -r Runner.app Payload/
+          mkdir -p Payload
+          # On cherche le binaire .app généré
+          find build/ios -name "Runner.app" -exec cp -r {} Payload/ \;
           zip -qq -r -9 Daytalia.ipa Payload
-        working-directory: build/ios/iphoneos
 
       - name: 🚀 Upload Artifact
-        uses: actions/upload-artifact@v4 # Version à jour
+        uses: actions/upload-artifact@v4
         with:
           name: Daytalia-IPA
-          path: build/ios/iphoneos/Daytalia.ipa
+          path: Daytalia.ipa
+          retention-days: 3

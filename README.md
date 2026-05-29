@@ -4,7 +4,7 @@ A new Flutter project.
 
 ## iOS build
 
-The GitHub Actions workflow in `.github/workflows/ios-build.yml` builds iOS with `flutter build ios --release --no-codesign` after refreshing Pods.
+The GitHub Actions workflow in `.github/workflows/ios-build.yml` builds iOS in release mode, packages `build/ios/iphoneos/Runner.app` into `Daytalia-unsigned.ipa`, and uploads that artifact.
 Download the artifact from Actions, then import the IPA into Sideloadly on Windows to sign and install it on your iPhone.
 
 ## Getting Started

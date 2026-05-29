@@ -350,7 +350,7 @@ class _AccountBlockedPageState extends State<AccountBlockedPage> {
           .collection('users')
           .doc(widget.userId)
           .get();
-      final data = doc.data() as Map<String, dynamic>? ?? {};
+      final data = doc.data() ?? {};
       final bool stillBlocked =
           data['accountBlocked'] == true || data['recoveryStatus'] == 'pending';
 

@@ -346,10 +346,10 @@ packages:
     dependency: "direct main"
     description:
       name: flutter_contacts
-      sha256: "388d32cd33f16640ee169570128c933b45f3259bddbfae7a100bb49e5ffea9ae"
+      sha256: "558247c39d89ca738aceb7859b6147a0ede0a5084492cffa215db87dea672479"
       url: "https://pub.dev"
     source: hosted
-    version: "1.1.9+2"
+    version: "2.2.0"
   flutter_dotenv:
     dependency: "direct main"
     description:

@@ -3,7 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:permission_handler/permission_handler.dart' as ph;
 import 'package:url_launcher/url_launcher.dart';
 import 'notification_service.dart';
 import 'profiluser_page.dart';
@@ -28,7 +28,7 @@ class _AddFriendsPageState extends State<AddFriendsPage>
   List<Map<String, dynamic>> _contactsOnApp = [];
   List<Contact> _contactsToInvite = [];
   bool _isLoadingSuggestions = false;
-  PermissionStatus? _contactPermissionStatus;
+  ph.PermissionStatus? _contactPermissionStatus;
 
   Color _backgroundColor = Colors.white;
   Color _textColor = Colors.black;
@@ -391,19 +391,18 @@ class _AddFriendsPageState extends State<AddFriendsPage>
     print(
       "[DEBUG] _getContactsOnApp: #1 Demande de permission pour les contacts.",
     ); // <-- DEBUG
-    _contactPermissionStatus = await Permission.contacts.request();
+    _contactPermissionStatus = await ph.Permission.contacts.request();
     print(
       "[DEBUG] _getContactsOnApp: #1.1 Statut de la permission: $_contactPermissionStatus",
     ); // <-- DEBUG
-    if (_contactPermissionStatus != PermissionStatus.granted) {
+    if (_contactPermissionStatus != ph.PermissionStatus.granted) {
       if (mounted) setState(() {});
       return [];
     }
 
     try {
-      final List<Contact> phoneContacts = await FlutterContacts.getContacts(
-        withProperties: true,
-        withPhoto: false,
+      final List<Contact> phoneContacts = await FlutterContacts.getAll(
+        properties: {ContactProperty.name, ContactProperty.phone},
       );
       print(
         "[DEBUG] _getContactsOnApp: #2 Trouvé ${phoneContacts.length} contacts sur l'appareil.",
@@ -813,7 +812,7 @@ class _AddFriendsPageState extends State<AddFriendsPage>
         if (_contactsOnApp.isEmpty &&
             _suggestions.isEmpty &&
             _contactsToInvite.isEmpty &&
-            _contactPermissionStatus == PermissionStatus.granted)
+            _contactPermissionStatus == ph.PermissionStatus.granted)
           Center(
             child: Padding(
               padding: const EdgeInsets.all(20.0),
@@ -824,8 +823,8 @@ class _AddFriendsPageState extends State<AddFriendsPage>
               ),
             ),
           ),
-        if (_contactPermissionStatus == PermissionStatus.denied ||
-            _contactPermissionStatus == PermissionStatus.permanentlyDenied)
+        if (_contactPermissionStatus == ph.PermissionStatus.denied ||
+          _contactPermissionStatus == ph.PermissionStatus.permanentlyDenied)
           Center(
             child: Padding(
               padding: const EdgeInsets.all(20.0),
@@ -838,7 +837,7 @@ class _AddFriendsPageState extends State<AddFriendsPage>
                   ),
                   const SizedBox(height: 10),
                   ElevatedButton(
-                    onPressed: openAppSettings,
+                    onPressed: ph.openAppSettings,
                     child: const Text("Ouvrir les paramètres"),
                   ),
                 ],

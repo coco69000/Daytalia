@@ -46,6 +46,18 @@
     <key>UIApplicationSupportsIndirectInputEvents</key>
     <true/>
 
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>com.googleusercontent.apps.962379547213-b8dbf25560f33fbe2b5204</string>
+            </array>
+        </dict>
+    </array>
+
     <key>NSCameraUsageDescription</key>
     <string>Cette app a besoin d'accéder à la caméra pour prendre des photos.</string>
     <key>NSPhotoLibraryUsageDescription</key>

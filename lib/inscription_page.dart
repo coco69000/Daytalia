@@ -113,6 +113,7 @@ class _InscriptionPageState extends State<InscriptionPage> {
   }) async {
     setState(() => _isLoading = true);
     try {
+      await _auth.setSettings(appVerificationDisabledForTesting: false);
       await _auth.verifyPhoneNumber(
         phoneNumber: phoneNumber,
         verificationCompleted: (credential) async {

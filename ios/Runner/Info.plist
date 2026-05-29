@@ -56,6 +56,13 @@
 	<key>NSContactsUsageDescription</key>
 	<string>Cette app nécessite l'accès à vos contacts pour fonctionner correctement.</string>
 
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Cette app a besoin d'accéder au micro pour la reconnaissance vocale.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Cette app a besoin d'accéder à la reconnaissance vocale pour dicter du texte.</string>
+	<key>NSUserTrackingUsageDescription</key>
+	<string>Cette app utilise le suivi pour améliorer la diffusion de certaines notifications.</string>
+
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

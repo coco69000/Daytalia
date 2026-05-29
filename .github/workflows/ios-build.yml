@@ -17,27 +17,24 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: 📦 Get Packages
-        run: flutter pub get
+      - name: 🧹 Clean & Get Packages
+        # On nettoie pour éviter que d'anciens fichiers de "Debug" ne polluent la "Release"
+        run: |
+          flutter clean
+          flutter pub get
 
       - name: 📂 Update Pods
         run: pod install --repo-update
         working-directory: ios
 
       - name: 🏗️ Build iOS unsigned IPA
-        # Flutter reconstruit automatiquement le lien natif avec les Pods/Firebase avant de produire le .app.
-        run: flutter build ios --release --no-codesign
-
-      - name: 📦 Prepare unsigned IPA
-        run: |
-          rm -rf Payload Daytalia.ipa
-          mkdir -p Payload
-          cp -R build/ios/iphoneos/Runner.app Payload/
-          zip -qry Daytalia-unsigned.ipa Payload
+        # On génère l'IPA en mode Release (indispensable pour iOS 14+)
+        run: flutter build ipa --release --no-codesign
 
       - name: 🚀 Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Daytalia-unsigned-ipa
-          path: Daytalia-unsigned.ipa
+          # Le chemin correct après un "build ipa" est celui-ci
+          path: build/ios/ipa/*.ipa
           retention-days: 3

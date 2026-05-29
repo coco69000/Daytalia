@@ -1,5 +1,7 @@
 // lib/main.dart
 
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -63,18 +65,37 @@ class _RestartWidgetState extends State<RestartWidget> {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await initializeDateFormatting('fr_FR', null);
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+    debugPrint('Flutter error at startup: ${details.exceptionAsString()}');
+  };
 
-  OneSignal.initialize("83c44506-2022-4432-a8fe-004e4406416e");
-  OneSignal.Notifications.requestPermission(true);
+  PlatformDispatcher.instance.onError = (error, stack) {
+    debugPrint('Unhandled error at startup: $error');
+    debugPrintStack(stackTrace: stack);
+    return true;
+  };
 
-  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+  try {
+    await initializeDateFormatting('fr_FR', null);
+    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  // Charger le thème AVANT runApp pour éviter le flash
-  await _loadInitialAppBrightness();
+    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
-  runApp(const RestartWidget(child: MyApp()));
+    // Charger le thème AVANT runApp pour éviter le flash
+    await _loadInitialAppBrightness();
+
+    runApp(const RestartWidget(child: MyApp()));
+  } catch (e, stack) {
+    debugPrint('Fatal startup error: $e');
+    debugPrintStack(stackTrace: stack);
+    runApp(
+      MaterialApp(
+        debugShowCheckedModeBanner: false,
+        home: _StartupErrorPage(error: e.toString()),
+      ),
+    );
+  }
 }
 
 Future<void> _loadInitialAppBrightness() async {
@@ -102,8 +123,21 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   print('Message en arrière-plan reçu : ${message.notification?.title}');
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(initializePushServices());
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -118,6 +152,93 @@ class MyApp extends StatelessWidget {
           debugShowCheckedModeBanner: false,
         );
       },
+    );
+  }
+}
+
+Future<void> initializePushServices() async {
+  try {
+    OneSignal.initialize('83c44506-2022-4432-a8fe-004e4406416e');
+    OneSignal.Notifications.requestPermission(true);
+  } catch (e, stack) {
+    debugPrint('Erreur OneSignal au démarrage: $e');
+    debugPrintStack(stackTrace: stack);
+  }
+}
+
+class _StartupErrorPage extends StatelessWidget {
+  final String error;
+
+  const _StartupErrorPage({required this.error});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = MediaQuery.of(context).platformBrightness == Brightness.dark;
+    final background = isDark ? const Color(0xFF0F1116) : const Color(0xFFF6F9FF);
+    final cardBackground = isDark ? const Color(0xFF1A2030) : Colors.white;
+    final textColor = isDark ? Colors.white : Colors.black87;
+
+    return Scaffold(
+      backgroundColor: background,
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 560),
+              child: Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: cardBackground,
+                  borderRadius: BorderRadius.circular(24),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.12),
+                      blurRadius: 24,
+                      offset: const Offset(0, 12),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.error_outline, color: Colors.red.shade400, size: 52),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Daytalia n’a pas pu démarrer',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: textColor,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Une erreur est survenue pendant l’initialisation. Vérifie la configuration Firebase iOS et les permissions du projet.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: isDark ? Colors.white70 : Colors.black54,
+                        height: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    SelectableText(
+                      error,
+                      textAlign: TextAlign.left,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark ? Colors.white60 : Colors.black45,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

@@ -80,9 +80,12 @@ void main() async {
     await initializeDateFormatting('fr_FR', null);
     await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
+    await FirebaseAuth.instance.setSettings(
+      appVerificationDisabledForTesting: true,
+    );
+
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
-    // Charger le thème AVANT runApp pour éviter le flash
     await _loadInitialAppBrightness();
 
     runApp(const RestartWidget(child: MyApp()));

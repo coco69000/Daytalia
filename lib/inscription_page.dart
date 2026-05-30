@@ -33,7 +33,6 @@ class InscriptionPage extends StatefulWidget {
 class _InscriptionPageState extends State<InscriptionPage> {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseStorage _storage = FirebaseStorage.instance;
   final RegExp _e164PhonePattern = RegExp(r'^\+[1-9]\d{7,14}$');
 
   final _formKey = GlobalKey<FormState>();
@@ -62,9 +61,11 @@ class _InscriptionPageState extends State<InscriptionPage> {
   void initState() {
     super.initState();
     _currentFlow = widget.initialFlow;
+    debugPrint('[AUTH] InscriptionPage initState with initialFlow=$_currentFlow');
     FirebaseAuth.instance.setSettings(
-      appVerificationDisabledForTesting: false,
+      appVerificationDisabledForTesting: true,
     );
+    debugPrint('[AUTH] FirebaseAuth settings applied in InscriptionPage (appVerificationDisabledForTesting=true)');
   }
 
   @override
@@ -77,6 +78,7 @@ class _InscriptionPageState extends State<InscriptionPage> {
   }
 
   void _resetToStart() {
+    debugPrint('[AUTH] Reset flow to start');
     setState(() {
       _currentFlow = AuthFlow.phoneInput;
       _isLoading = false;
@@ -116,7 +118,9 @@ class _InscriptionPageState extends State<InscriptionPage> {
     required AuthFlow nextFlow,
   }) async {
     final normalizedPhoneNumber = _normalizePhoneNumber(phoneNumber);
+    debugPrint('[AUTH] _sendOtp requested: raw=$phoneNumber normalized=$normalizedPhoneNumber nextFlow=$nextFlow');
     if (!_isValidE164PhoneNumber(normalizedPhoneNumber)) {
+      debugPrint('[AUTH] _sendOtp aborted: invalid E164 number');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -130,18 +134,20 @@ class _InscriptionPageState extends State<InscriptionPage> {
     }
 
     setState(() => _isLoading = true);
+    debugPrint('[AUTH] _sendOtp calling verifyPhoneNumber');
 
     try {
       await _auth.verifyPhoneNumber(
         phoneNumber: normalizedPhoneNumber,
         verificationCompleted: (credential) async {
+          debugPrint('[AUTH] verificationCompleted triggered');
           if (!mounted) return;
           await _signInAndNavigate(credential);
           if (mounted) setState(() => _isLoading = false);
         },
         verificationFailed: (FirebaseAuthException e) {
           if (!mounted) return;
-          print('verificationFailed: ${e.code} — ${e.message}');
+          debugPrint('[AUTH] verificationFailed: ${e.code} — ${e.message}');
           setState(() => _isLoading = false);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -152,7 +158,7 @@ class _InscriptionPageState extends State<InscriptionPage> {
         },
         codeSent: (verificationId, resendToken) {
           if (!mounted) return;
-          print('codeSent: verificationId=$verificationId');
+          debugPrint('[AUTH] codeSent: verificationId=$verificationId resendToken=$resendToken');
           setState(() {
             _verificationId = verificationId;
             _currentFlow = nextFlow;
@@ -160,11 +166,13 @@ class _InscriptionPageState extends State<InscriptionPage> {
           });
         },
         codeAutoRetrievalTimeout: (verificationId) {
+          debugPrint('[AUTH] codeAutoRetrievalTimeout: verificationId=$verificationId');
           if (mounted) _verificationId = verificationId;
         },
       );
+      debugPrint('[AUTH] verifyPhoneNumber returned without throwing');
     } catch (e) {
-      print('_sendOtp error: $e');
+      debugPrint('[AUTH] _sendOtp error: $e');
       if (mounted) {
         setState(() => _isLoading = false);
       }
@@ -172,6 +180,7 @@ class _InscriptionPageState extends State<InscriptionPage> {
   }
 
   Future<void> _verifyOtpAndProceed() async {
+    debugPrint('[AUTH] _verifyOtpAndProceed called, flow=$_currentFlow');
     if (_otpController.text.isEmpty || _verificationId == null) return;
     setState(() => _isLoading = true);
 
@@ -181,8 +190,10 @@ class _InscriptionPageState extends State<InscriptionPage> {
         smsCode: _otpController.text,
       );
       if (_currentFlow == AuthFlow.otpVerification) {
+        debugPrint('[AUTH] OTP flow: signing in with credential');
         await _signInAndNavigate(credential);
       } else if (_currentFlow == AuthFlow.changeNumber_VerifyNew) {
+        debugPrint('[AUTH] OTP flow: change number verification path');
         if (mounted) {
           setState(() {
             _currentFlow = AuthFlow.recoveryInfo;
@@ -201,6 +212,7 @@ class _InscriptionPageState extends State<InscriptionPage> {
         }
       }
     } catch (e) {
+      debugPrint('[AUTH] _verifyOtpAndProceed error: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Code OTP invalide ou expiré.')),
@@ -211,6 +223,7 @@ class _InscriptionPageState extends State<InscriptionPage> {
   }
 
   Future<void> _checkPhoneAndSendOtp() async {
+    debugPrint('[AUTH] _checkPhoneAndSendOtp called with phone=$_phoneNumber');
     if (_phoneNumber.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -221,19 +234,19 @@ class _InscriptionPageState extends State<InscriptionPage> {
     }
     setState(() => _isLoading = true);
     try {
-      print('Searching Firestore for phoneNumber=$_phoneNumber');
+      debugPrint('[AUTH] Searching Firestore for phoneNumber=$_phoneNumber');
       final userQuery =
           await _firestore
               .collection('users')
               .where('phoneNumber', isEqualTo: _phoneNumber)
               .limit(1)
               .get();
-      print('Firestore result: ${userQuery.docs.length} doc(s) found');
+      debugPrint('[AUTH] Firestore result: ${userQuery.docs.length} doc(s) found');
       setState(() {
         _isExistingUser = userQuery.docs.isNotEmpty;
       });
     } catch (e) {
-      print('Firestore query error: $e');
+      debugPrint('[AUTH] Firestore query error: $e');
       setState(() => _isExistingUser = false);
     }
     await _sendOtp(
@@ -339,26 +352,34 @@ class _InscriptionPageState extends State<InscriptionPage> {
   Future<String> _uploadProfilePicture(String uid) async {
     if (_profileImage == null) return '';
     try {
-      final ref = _storage.ref().child('profile_pictures').child('$uid.jpg');
+      debugPrint('[AUTH] Uploading profile picture for uid=$uid');
+      final ref = FirebaseStorage.instance
+          .ref()
+          .child('profile_pictures')
+          .child('$uid.jpg');
       await ref.putFile(_profileImage!);
+      debugPrint('[AUTH] Profile picture upload completed for uid=$uid');
       return await ref.getDownloadURL();
     } catch (e) {
-      print("Erreur d'upload d'image: $e");
+      debugPrint("[AUTH] Erreur d'upload d'image: $e");
       return '';
     }
   }
 
   Future<void> _createAccount() async {
+    debugPrint('[AUTH] _createAccount called');
     if (!_formKey.currentState!.validate() || _usernameError.isNotEmpty) return;
     setState(() => _isLoading = true);
 
     final user = _auth.currentUser;
     if (user == null) {
+      debugPrint('[AUTH] _createAccount aborted: no current user');
       _resetToStart();
       return;
     }
 
     try {
+      debugPrint('[AUTH] Creating profile for uid=${user.uid}');
       String profileImageUrl = await _uploadProfilePicture(user.uid);
       final batch = _firestore.batch();
 
@@ -399,6 +420,7 @@ class _InscriptionPageState extends State<InscriptionPage> {
       );
 
       await batch.commit();
+      debugPrint('[AUTH] Account profile created and batch committed for uid=${user.uid}');
 
       if (mounted) {
         Navigator.of(context).pushAndRemoveUntil(
@@ -407,6 +429,7 @@ class _InscriptionPageState extends State<InscriptionPage> {
         );
       }
     } catch (e) {
+      debugPrint('[AUTH] _createAccount error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(

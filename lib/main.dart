@@ -65,6 +65,7 @@ class _RestartWidgetState extends State<RestartWidget> {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  debugPrint('[BOOT] WidgetsFlutterBinding initialized');
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
     debugPrint('Flutter error at startup: ${details.exceptionAsString()}');
@@ -77,17 +78,28 @@ void main() async {
   };
 
   try {
+    debugPrint('[BOOT] Initializing locale data fr_FR');
     await initializeDateFormatting('fr_FR', null);
-    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+    debugPrint('[BOOT] Locale data initialized');
 
+    debugPrint('[BOOT] Initializing Firebase app');
+    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+    debugPrint('[BOOT] Firebase app initialized');
+
+    debugPrint('[BOOT] Applying FirebaseAuth testing settings');
     await FirebaseAuth.instance.setSettings(
       appVerificationDisabledForTesting: true,
     );
+    debugPrint('[BOOT] FirebaseAuth settings applied (appVerificationDisabledForTesting=true)');
 
+    debugPrint('[BOOT] Registering Firebase Messaging background handler');
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
+    debugPrint('[BOOT] Loading initial app brightness');
     await _loadInitialAppBrightness();
+    debugPrint('[BOOT] Initial brightness loaded');
 
+    debugPrint('[BOOT] Running app');
     runApp(const RestartWidget(child: MyApp()));
   } catch (e, stack) {
     debugPrint('Fatal startup error: $e');
@@ -103,8 +115,10 @@ void main() async {
 
 Future<void> _loadInitialAppBrightness() async {
   try {
+    debugPrint('[THEME] Loading theme preference from SharedPreferences');
     SharedPreferences prefs = await SharedPreferences.getInstance();
     String? themeMode = prefs.getString('themeMode');
+    debugPrint('[THEME] themeMode in prefs: $themeMode');
     Brightness loadedBrightness;
     if (themeMode == 'dark') {
       loadedBrightness = Brightness.dark;
@@ -115,15 +129,16 @@ Future<void> _loadInitialAppBrightness() async {
       loadedBrightness = Brightness.dark;
     }
     appBrightnessNotifier.value = loadedBrightness;
+    debugPrint('[THEME] Applied brightness: ${loadedBrightness.name}');
   } catch (e) {
-    print('Erreur de chargement du thème initial : $e');
+    debugPrint('[THEME] Erreur de chargement du thème initial: $e');
     appBrightnessNotifier.value = Brightness.dark;
   }
 }
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  print('Message en arrière-plan reçu : ${message.notification?.title}');
+  debugPrint('[FCM][BG] Message recu: id=${message.messageId}, title=${message.notification?.title}');
 }
 
 class MyApp extends StatefulWidget {

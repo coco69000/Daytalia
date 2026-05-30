@@ -4,6 +4,14 @@ import UIKit
 
 @main
 @objc class AppDelegate: FlutterAppDelegate {
+  private var apnsTokenType: AuthAPNSTokenType {
+#if DEBUG
+    return .sandbox
+#else
+    return .prod
+#endif
+  }
+
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
@@ -17,7 +25,7 @@ import UIKit
     _ application: UIApplication,
     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
   ) {
-    Auth.auth().setAPNSToken(deviceToken, type: .unknown)
+    Auth.auth().setAPNSToken(deviceToken, type: apnsTokenType)
     super.application(application, didRegisterForRemoteNotificationsWithDeviceToken: deviceToken)
   }
 

@@ -34,6 +34,7 @@ class _InscriptionPageState extends State<InscriptionPage> {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseStorage _storage = FirebaseStorage.instance;
+  final RegExp _e164PhonePattern = RegExp(r'^\+[1-9]\d{7,14}$');
 
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
@@ -111,25 +112,37 @@ class _InscriptionPageState extends State<InscriptionPage> {
     required String phoneNumber,
     required AuthFlow nextFlow,
   }) async {
+    final normalizedPhoneNumber = _normalizePhoneNumber(phoneNumber);
+    if (!_isValidE164PhoneNumber(normalizedPhoneNumber)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Le numéro de téléphone doit être au format international, par exemple +33612345678.',
+            ),
+          ),
+        );
+      }
+      return;
+    }
+
     setState(() => _isLoading = true);
+
     try {
       await _auth.verifyPhoneNumber(
-        phoneNumber: phoneNumber,
+        phoneNumber: normalizedPhoneNumber,
         verificationCompleted: (credential) async {
           if (!mounted) return;
-          if (_currentFlow == AuthFlow.phoneInput ||
-              _currentFlow == AuthFlow.otpVerification) {
-            await _signInAndNavigate(credential);
-          }
+          await _signInAndNavigate(credential);
           if (mounted) setState(() => _isLoading = false);
         },
-        verificationFailed: (e) {
+        verificationFailed: (FirebaseAuthException e) {
           if (!mounted) return;
           print('verificationFailed: ${e.code} — ${e.message}');
           setState(() => _isLoading = false);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Erreur d\'envoi du code : ${e.message ?? e.code}'),
+              content: Text('Erreur : ${e.message ?? e.code}'),
               duration: const Duration(seconds: 6),
             ),
           );
@@ -144,20 +157,13 @@ class _InscriptionPageState extends State<InscriptionPage> {
           });
         },
         codeAutoRetrievalTimeout: (verificationId) {
-          print('codeAutoRetrievalTimeout');
           if (mounted) _verificationId = verificationId;
         },
       );
     } catch (e) {
-      print('_sendOtp exception: $e');
+      print('_sendOtp error: $e');
       if (mounted) {
         setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erreur inattendue : $e'),
-            duration: const Duration(seconds: 6),
-          ),
-        );
       }
     }
   }
@@ -272,6 +278,20 @@ class _InscriptionPageState extends State<InscriptionPage> {
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  String _normalizePhoneNumber(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) {
+      return trimmed;
+    }
+
+    final compacted = trimmed.replaceAll(RegExp(r'[\s\-()\.]+'), '');
+    return compacted.startsWith('+') ? compacted : '+$compacted';
+  }
+
+  bool _isValidE164PhoneNumber(String value) {
+    return _e164PhonePattern.hasMatch(value);
   }
 
   Future<void> _signInAndNavigate(PhoneAuthCredential credential) async {

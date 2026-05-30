@@ -4,29 +4,12 @@ import UIKit
 
 @main
 @objc class AppDelegate: FlutterAppDelegate {
-  private var apnsTokenType: AuthAPNSTokenType {
-#if DEBUG
-    return .sandbox
-#else
-    return .prod
-#endif
-  }
-
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
     GeneratedPluginRegistrant.register(with: self)
-    application.registerForRemoteNotifications()
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
-  }
-
-  override func application(
-    _ application: UIApplication,
-    didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
-  ) {
-    Auth.auth().setAPNSToken(deviceToken, type: apnsTokenType)
-    super.application(application, didRegisterForRemoteNotificationsWithDeviceToken: deviceToken)
   }
 
   override func application(

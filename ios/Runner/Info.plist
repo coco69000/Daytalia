@@ -56,6 +56,14 @@
                 <string>com.googleusercontent.apps.962379547213-b8dbf25560f33fbe2b5204</string>
             </array>
         </dict>
+        <dict>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>app-1-962379547213-ios-b8dbf25560f33fbe2b5204</string>
+            </array>
+        </dict>
     </array>
 
     <key>NSCameraUsageDescription</key>

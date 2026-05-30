@@ -59,13 +59,13 @@ class _InscriptionPageState extends State<InscriptionPage> {
   double _qualityOfLife = 50.0;
 
   @override
-void initState() {
-  super.initState();
-  _currentFlow = widget.initialFlow;
-  FirebaseAuth.instance.setSettings(
-    appVerificationDisabledForTesting: true,
-  );
-}
+  void initState() {
+    super.initState();
+    _currentFlow = widget.initialFlow;
+    FirebaseAuth.instance.setSettings(
+      appVerificationDisabledForTesting: false,
+    );
+  }
 
   @override
   void dispose() {

@@ -125,14 +125,15 @@ Future<void> _loadInitialAppBrightness() async {
     } else if (themeMode == 'light') {
       loadedBrightness = Brightness.light;
     } else {
-      // Par défaut sombre si aucune préférence
-      loadedBrightness = Brightness.dark;
+      // Par défaut utiliser le thème du système du téléphone
+      loadedBrightness = WidgetsBinding.instance.platformDispatcher.platformBrightness;
     }
     appBrightnessNotifier.value = loadedBrightness;
     debugPrint('[THEME] Applied brightness: ${loadedBrightness.name}');
   } catch (e) {
     debugPrint('[THEME] Erreur de chargement du thème initial: $e');
-    appBrightnessNotifier.value = Brightness.dark;
+    // En cas d'erreur, utiliser le thème du système
+    appBrightnessNotifier.value = WidgetsBinding.instance.platformDispatcher.platformBrightness;
   }
 }
 
@@ -749,61 +750,67 @@ class _HomeBarrePageState extends State<HomeBarrePage>
                 left: 0,
                 right: 0,
                 bottom: 0,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                        vertical: 10,
-                      ),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: navbarBackgroundColor,
-                          borderRadius: BorderRadius.circular(30),
-                          border: Border.all(
-                            color: borderColor,
-                            width: isDarkMode ? 1.0 : 0.0,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color:
-                                  isDarkMode
-                                      ? Colors.black54
-                                      : Colors.grey.withOpacity(0.3),
-                              blurRadius: 10,
-                              offset: const Offset(0, 5),
-                            ),
-                          ],
+                child: SafeArea(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 10,
                         ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(30),
-                          child: BottomNavigationBar(
-                            backgroundColor: navbarBackgroundColor,
-                            selectedItemColor: selectedItemColor,
-                            unselectedItemColor: unselectedItemColor,
-                            showUnselectedLabels: false,
-                            items: const <BottomNavigationBarItem>[
-                              BottomNavigationBarItem(
-                                icon: Icon(Icons.home),
-                                label: 'Accueil',
-                              ),
-                              BottomNavigationBarItem(
-                                icon: Icon(Icons.add_circle),
-                                label: 'Ajouter',
-                              ),
-                              BottomNavigationBarItem(
-                                icon: Icon(Icons.person),
-                                label: 'Memories',
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: navbarBackgroundColor,
+                            borderRadius: BorderRadius.circular(30),
+                            border: Border.all(
+                              color: borderColor,
+                              width: isDarkMode ? 1.0 : 0.0,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color:
+                                    isDarkMode
+                                        ? Colors.black54
+                                        : Colors.grey.withOpacity(0.3),
+                                blurRadius: 10,
+                                offset: const Offset(0, 5),
                               ),
                             ],
-                            currentIndex: _selectedIndex,
-                            onTap: _onItemTapped,
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(30),
+                            child: MediaQuery.removePadding(
+                              context: context,
+                              removeBottom: true,
+                              child: BottomNavigationBar(
+                                backgroundColor: navbarBackgroundColor,
+                                selectedItemColor: selectedItemColor,
+                                unselectedItemColor: unselectedItemColor,
+                                showUnselectedLabels: false,
+                                items: const <BottomNavigationBarItem>[
+                                  BottomNavigationBarItem(
+                                    icon: Icon(Icons.home),
+                                    label: 'Accueil',
+                                  ),
+                                  BottomNavigationBarItem(
+                                    icon: Icon(Icons.add_circle),
+                                    label: 'Ajouter',
+                                  ),
+                                  BottomNavigationBarItem(
+                                    icon: Icon(Icons.person),
+                                    label: 'Memories',
+                                  ),
+                                ],
+                                currentIndex: _selectedIndex,
+                                onTap: _onItemTapped,
+                              ),
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ],

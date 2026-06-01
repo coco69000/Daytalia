@@ -27,7 +27,7 @@ import 'souvenir_model.dart' as sm;
 import 'theme_manager.dart';
 import 'notification_service.dart';
 
-const String DEEPSEEK_API_KEY = 'VOTRE_CLÉ_API_DEEPSEEK';
+const String DEEPSEEK_API_KEY = 'HA2RvSG1u7aE7u78yXd1UqnBuMY6VV70';
 const int _kNonVipAutobiographyCooldownDays = 14;
 const String _kApiUrl = 'https://api.deepinfra.com/v1/openai/chat/completions';
 // ... Le reste du code (getUserSubscriptionData, showVipPromotionPopup, AutobiographieDialog) reste inchangé ...
@@ -6750,12 +6750,10 @@ Format attendu:
               ),
               boxShadow: [
                 BoxShadow(
-                  color: cardColor.withOpacity(
-                    0.6,
-                  ), // Flou beaucoup plus visible !
-                  spreadRadius: 4,
-                  blurRadius: 20,
-                  offset: const Offset(0, 8),
+                  color: cardColor.withOpacity(0.3), // Opacité réduite
+                  spreadRadius: 1, // Réduit de 4 à 1
+                  blurRadius: 10,  // Réduit de 20 à 10
+                  offset: const Offset(0, 4), // Offset plus discret
                 ),
               ],
             ),
@@ -7316,7 +7314,7 @@ Format attendu:
     }
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 90.0),
+      padding: EdgeInsets.only(bottom: Platform.isIOS ? 110.0 : 90.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -8760,41 +8758,26 @@ Format attendu:
 
   Widget _buildTextWithBlurredAsterisks(String text, {TextStyle? style}) {
     List<TextSpan> spans = [];
-    final regex = RegExp(r'\*');
-
-    int start = 0;
-    for (Match match in regex.allMatches(text)) {
-      if (start < match.start) {
-        spans.add(
-          TextSpan(text: text.substring(start, match.start), style: style),
-        );
-      }
-      spans.add(
-        TextSpan(
-          text: '*',
-          style: (style ?? const TextStyle()).copyWith(
-            color: Colors.transparent,
-            shadows: [
-              Shadow(
-                blurRadius: 10.0,
-                color: (style?.color ?? Colors.black).withValues(alpha: 0.9),
-                offset: const Offset(0, 0),
-              ),
-            ],
-          ),
+    // Affiche le texte avec un effet de flou sans chercher les astérisques
+    spans.add(
+      TextSpan(
+        text: text,
+        style: (style ?? const TextStyle()).copyWith(
+          color: Colors.transparent, // Rend le texte invisible
+          shadows: [
+            Shadow(
+              blurRadius: 8.0, // Règle le flou ici
+              color: (style?.color ?? Colors.black).withOpacity(0.9),
+              offset: const Offset(0, 0),
+            ),
+          ],
         ),
-      );
-      start = match.end;
-    }
-    if (start < text.length) {
-      spans.add(TextSpan(text: text.substring(start), style: style));
-    }
+      ),
+    );
 
     return RichText(
       text: TextSpan(
-        style:
-            style ??
-            const TextStyle(fontSize: 18, height: 1.5, color: Colors.black),
+        style: style ?? const TextStyle(fontSize: 18, height: 1.5, color: Colors.black),
         children: spans,
       ),
     );
